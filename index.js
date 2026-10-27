@@ -14,9 +14,13 @@ let viewerSpace = null;
 let localSpace = null;
 
 let placeRequested = false;
+let placeRequestTime = 0;
+
 let surfaceValid = false;
 let surfaceAngle = 0;
 let anchorsEnabled = false;
+
+let tapCount = 0;
 
 const placed = [];
 const anchors = [];
@@ -24,7 +28,9 @@ const anchors = [];
 const TABLE_WIDTH = 1.0;
 const TABLE_DEPTH = 0.5;
 const TABLE_HEIGHT = 0.45;
+
 const MAX_TABLES = 5;
+const MAX_PLACE_WAIT = 1500;
 
 const status = document.getElementById("status");
 const clearButton = document.getElementById("clear");
@@ -127,8 +133,10 @@ async function checkARSupport() {
 
     if (!navigator.xr) {
         fallback.hidden = false;
+
         fallback.textContent =
             "WebXR is not supported on this device.";
+
         return;
     }
 
@@ -139,19 +147,26 @@ async function checkARSupport() {
             );
 
         if (supported) {
-            btn = document.createElement("button");
+            btn =
+                document.createElement(
+                    "button"
+                );
 
-            btn.textContent = "START AR";
+            btn.textContent =
+                "START AR";
 
             btn.addEventListener(
                 "click",
                 onRequestSession
             );
 
-            document.body.appendChild(btn);
+            document.body.appendChild(
+                btn
+            );
 
         } else {
             fallback.hidden = false;
+
             fallback.textContent =
                 "Immersive AR is not supported on this device.";
         }
@@ -194,7 +209,9 @@ async function onRequestSession() {
                 }
             );
 
-        await onSessionStarted(session);
+        await onSessionStarted(
+            session
+        );
 
     } catch (error) {
         console.error(
@@ -218,17 +235,14 @@ async function onSessionStarted(session) {
         onSessionEnd
     );
 
-    /*
-        On Android handheld AR, touching the screen
-        creates an XR select interaction.
-
-        We only request placement here.
-        The object is created later inside render()
-        using the current hit-test result.
-    */
     session.addEventListener(
         "selectstart",
-        onXRSelect
+        requestPlacement
+    );
+
+    session.addEventListener(
+        "select",
+        requestPlacement
     );
 
     renderer.xr.setReferenceSpaceType(
@@ -253,7 +267,9 @@ async function onSessionStarted(session) {
         anchorsEnabled =
             Array.from(
                 session.enabledFeatures
-            ).includes("anchors");
+            ).includes(
+                "anchors"
+            );
     } else {
         anchorsEnabled = false;
     }
@@ -263,25 +279,40 @@ async function onSessionStarted(session) {
             space: viewerSpace
         });
 
-    btn.textContent = "STOP AR";
+    btn.textContent =
+        "STOP AR";
 
     updateStatus();
-    animate();
-}
 
-function onXRSelect() {
-    placeRequested = true;
-}
-
-function animate() {
     renderer.setAnimationLoop(
         render
     );
 }
 
+function requestPlacement() {
+    /*
+        selectstart and select may both fire
+        for one physical tap.
+
+        Only count/request once until the
+        current request has been processed.
+    */
+
+    if (!placeRequested) {
+        tapCount++;
+
+        placeRequested = true;
+        placeRequestTime =
+            performance.now();
+    }
+}
+
 function render(time, frame) {
     if (frame && xrSession) {
         updateAnchors(frame);
+
+        let currentHit = null;
+        let currentPose = null;
 
         if (
             hitTestSource &&
@@ -292,71 +323,58 @@ function render(time, frame) {
                     hitTestSource
                 );
 
-            if (results.length > 0) {
-                const hit = results[0];
+            if (
+                results.length > 0
+            ) {
+                currentHit =
+                    results[0];
 
-                const pose =
-                    hit.getPose(
+                currentPose =
+                    currentHit.getPose(
                         localSpace
                     );
+            }
+        }
 
-                if (pose) {
-                    reticle.visible = true;
+        if (currentPose) {
+            updateReticle(
+                currentPose
+            );
+        } else {
+            reticle.visible =
+                false;
 
-                    reticle.matrix.fromArray(
-                        pose.transform.matrix
-                    );
+            surfaceValid =
+                false;
 
-                    const matrix =
-                        pose.transform.matrix;
+            surfaceAngle =
+                0;
+        }
 
-                    const normal =
-                        new THREE.Vector3(
-                            matrix[4],
-                            matrix[5],
-                            matrix[6]
-                        ).normalize();
+        if (placeRequested) {
+            const waitingTime =
+                performance.now() -
+                placeRequestTime;
 
-                    const worldUp =
-                        new THREE.Vector3(
-                            0,
-                            1,
-                            0
-                        );
+            if (
+                currentHit &&
+                currentPose &&
+                surfaceValid
+            ) {
+                placeTable(
+                    currentHit,
+                    currentPose
+                );
 
-                    surfaceAngle =
-                        THREE.MathUtils.radToDeg(
-                            normal.angleTo(
-                                worldUp
-                            )
-                        );
+                placeRequested =
+                    false;
 
-                    surfaceValid =
-                        surfaceAngle <= 12;
-
-                    reticle.material.color.set(
-                        surfaceValid
-                            ? 0x00ff00
-                            : 0xff0000
-                    );
-
-                    if (placeRequested) {
-                        if (surfaceValid) {
-                            placeTable(
-                                hit,
-                                pose
-                            );
-                        }
-
-                        placeRequested = false;
-                    }
-
-                } else {
-                    loseTracking();
-                }
-
-            } else {
-                loseTracking();
+            } else if (
+                waitingTime >
+                MAX_PLACE_WAIT
+            ) {
+                placeRequested =
+                    false;
             }
         }
     }
@@ -369,14 +387,45 @@ function render(time, frame) {
     );
 }
 
-function loseTracking() {
-    reticle.visible = false;
-    surfaceValid = false;
-    surfaceAngle = 0;
+function updateReticle(pose) {
+    reticle.visible = true;
 
-    if (placeRequested) {
-        placeRequested = false;
-    }
+    reticle.matrix.fromArray(
+        pose.transform.matrix
+    );
+
+    const matrix =
+        pose.transform.matrix;
+
+    const normal =
+        new THREE.Vector3(
+            matrix[4],
+            matrix[5],
+            matrix[6]
+        ).normalize();
+
+    const worldUp =
+        new THREE.Vector3(
+            0,
+            1,
+            0
+        );
+
+    surfaceAngle =
+        THREE.MathUtils.radToDeg(
+            normal.angleTo(
+                worldUp
+            )
+        );
+
+    surfaceValid =
+        surfaceAngle <= 12;
+
+    reticle.material.color.set(
+        surfaceValid
+            ? 0x00ff00
+            : 0xff0000
+    );
 }
 
 function placeTable(hit, pose) {
@@ -426,8 +475,11 @@ function createCoffeeTable() {
             metalness: 0
         });
 
-    const topThickness = 0.05;
-    const legSize = 0.06;
+    const topThickness =
+        0.05;
+
+    const legSize =
+        0.06;
 
     const legHeight =
         TABLE_HEIGHT -
@@ -461,28 +513,42 @@ function createCoffeeTable() {
 
     const positions = [
         [
-            -TABLE_WIDTH / 2 + legSize,
+            -TABLE_WIDTH / 2 +
+                legSize,
             legY,
-            -TABLE_DEPTH / 2 + legSize
+            -TABLE_DEPTH / 2 +
+                legSize
         ],
+
         [
-            TABLE_WIDTH / 2 - legSize,
+            TABLE_WIDTH / 2 -
+                legSize,
             legY,
-            -TABLE_DEPTH / 2 + legSize
+            -TABLE_DEPTH / 2 +
+                legSize
         ],
+
         [
-            -TABLE_WIDTH / 2 + legSize,
+            -TABLE_WIDTH / 2 +
+                legSize,
             legY,
-            TABLE_DEPTH / 2 - legSize
+            TABLE_DEPTH / 2 -
+                legSize
         ],
+
         [
-            TABLE_WIDTH / 2 - legSize,
+            TABLE_WIDTH / 2 -
+                legSize,
             legY,
-            TABLE_DEPTH / 2 - legSize
+            TABLE_DEPTH / 2 -
+                legSize
         ]
     ];
 
-    for (const position of positions) {
+    for (
+        const position
+        of positions
+    ) {
         const leg =
             new THREE.Mesh(
                 legGeometry,
@@ -543,7 +609,10 @@ function updateAnchors(frame) {
         return;
     }
 
-    for (const item of anchors) {
+    for (
+        const item
+        of anchors
+    ) {
         const pose =
             frame.getPose(
                 item.anchor.anchorSpace,
@@ -570,7 +639,8 @@ function removeTable(table) {
     const index =
         anchors.findIndex(
             item =>
-                item.table === table
+                item.table ===
+                table
         );
 
     if (index !== -1) {
@@ -578,6 +648,7 @@ function removeTable(table) {
             anchors[
                 index
             ].anchor.delete();
+
         } catch (error) {
             console.log(
                 "Anchor already removed."
@@ -602,6 +673,8 @@ function clearProducts() {
             table
         );
     }
+
+    placeRequested = false;
 
     updateStatus();
 }
@@ -628,22 +701,27 @@ function updateStatus() {
     const angleText =
         reticle &&
         reticle.visible
-            ? surfaceAngle.toFixed(1) +
-              "°"
+            ? surfaceAngle.toFixed(
+                1
+            ) + "°"
             : "-";
 
     status.innerHTML =
         "ID: 241482<br>" +
         "Variant: Coffee Table<br>" +
+
         "Session: " +
         sessionState +
         "<br>" +
+
         "Reticle: " +
         reticleState +
         "<br>" +
+
         "Angle: " +
         angleText +
         "<br>" +
+
         "Anchors: " +
         (
             anchorsEnabled
@@ -651,6 +729,11 @@ function updateStatus() {
                 : "OFF"
         ) +
         "<br>" +
+
+        "Taps: " +
+        tapCount +
+        "<br>" +
+
         "Products: " +
         placed.length +
         " / " +
@@ -662,9 +745,13 @@ function onSessionEnd() {
         hitTestSource.cancel();
     }
 
-    for (const item of anchors) {
+    for (
+        const item
+        of anchors
+    ) {
         try {
             item.anchor.delete();
+
         } catch (error) {
             console.log(
                 "Anchor already removed."
@@ -680,9 +767,13 @@ function onSessionEnd() {
     localSpace = null;
 
     placeRequested = false;
+    placeRequestTime = 0;
+
     surfaceValid = false;
     surfaceAngle = 0;
     anchorsEnabled = false;
+
+    tapCount = 0;
 
     reticle.visible = false;
 
