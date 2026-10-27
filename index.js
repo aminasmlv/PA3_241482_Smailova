@@ -81,6 +81,7 @@ function loadScene() {
         0.08,
         32
     );
+
     reticleGeometry.rotateX(-Math.PI / 2);
 
     const reticleMaterial = new THREE.MeshBasicMaterial({
@@ -119,20 +120,31 @@ async function checkARSupport() {
 
     if (!navigator.xr) {
         fallback.hidden = false;
-        fallback.textContent = "WebXR is not supported on this device.";
+        fallback.textContent =
+            "WebXR is not supported on this device.";
         return;
     }
 
-    const supported = await navigator.xr.isSessionSupported("immersive-ar");
+    try {
+        const supported =
+            await navigator.xr.isSessionSupported("immersive-ar");
 
-    if (supported) {
-        btn = document.createElement("button");
-        btn.textContent = "START AR";
-        btn.addEventListener("click", onRequestSession);
-        document.body.appendChild(btn);
-    } else {
+        if (supported) {
+            btn = document.createElement("button");
+            btn.textContent = "START AR";
+
+            btn.addEventListener("click", onRequestSession);
+
+            document.body.appendChild(btn);
+        } else {
+            fallback.hidden = false;
+            fallback.textContent =
+                "Immersive AR is not supported on this device.";
+        }
+    } catch (error) {
         fallback.hidden = false;
-        fallback.textContent = "Immersive AR is not supported on this device.";
+        fallback.textContent =
+            "AR support check failed: " + error.message;
     }
 }
 
@@ -142,13 +154,28 @@ async function onRequestSession() {
         return;
     }
 
-    const session = await navigator.xr.requestSession("immersive-ar", {
-        requiredFeatures: ["hit-test"],
-        optionalFeatures: ["anchors", "dom-overlay"],
-        domOverlay: { root: overlay }
-    });
+    try {
+        status.innerHTML = "Starting AR...";
 
-    await onSessionStarted(session);
+        const session =
+            await navigator.xr.requestSession("immersive-ar", {
+                requiredFeatures: ["hit-test"],
+                optionalFeatures: ["anchors", "dom-overlay"],
+                domOverlay: {
+                    root: overlay
+                }
+            });
+
+        await onSessionStarted(session);
+
+    } catch (error) {
+        console.error("AR start error:", error);
+
+        status.innerHTML =
+            "AR ERROR:<br>" +
+            error.name + "<br>" +
+            error.message;
+    }
 }
 
 async function onSessionStarted(session) {
@@ -159,16 +186,20 @@ async function onSessionStarted(session) {
     renderer.xr.setReferenceSpaceType("local");
     await renderer.xr.setSession(session);
 
-    viewerSpace = await session.requestReferenceSpace("viewer");
-    localSpace = await session.requestReferenceSpace("local");
+    viewerSpace =
+        await session.requestReferenceSpace("viewer");
+
+    localSpace =
+        await session.requestReferenceSpace("local");
 
     anchorsEnabled = session.enabledFeatures
         ? session.enabledFeatures.has("anchors")
         : false;
 
-    hitTestSource = await session.requestHitTestSource({
-        space: viewerSpace
-    });
+    hitTestSource =
+        await session.requestHitTestSource({
+            space: viewerSpace
+        });
 
     btn.textContent = "STOP AR";
 
@@ -185,7 +216,8 @@ function render(time, frame) {
         updateAnchors(frame);
 
         if (hitTestSource && localSpace) {
-            const results = frame.getHitTestResults(hitTestSource);
+            const results =
+                frame.getHitTestResults(hitTestSource);
 
             if (results.length > 0) {
                 const hit = results[0];
@@ -195,9 +227,12 @@ function render(time, frame) {
                     currentHit = hit;
 
                     reticle.visible = true;
-                    reticle.matrix.fromArray(pose.transform.matrix);
+                    reticle.matrix.fromArray(
+                        pose.transform.matrix
+                    );
 
-                    const matrix = pose.transform.matrix;
+                    const matrix =
+                        pose.transform.matrix;
 
                     const normal = new THREE.Vector3(
                         matrix[4],
@@ -205,16 +240,21 @@ function render(time, frame) {
                         matrix[6]
                     ).normalize();
 
-                    const worldUp = new THREE.Vector3(0, 1, 0);
+                    const worldUp =
+                        new THREE.Vector3(0, 1, 0);
 
-                    surfaceAngle = THREE.MathUtils.radToDeg(
-                        normal.angleTo(worldUp)
-                    );
+                    surfaceAngle =
+                        THREE.MathUtils.radToDeg(
+                            normal.angleTo(worldUp)
+                        );
 
-                    surfaceValid = surfaceAngle <= 12;
+                    surfaceValid =
+                        surfaceAngle <= 12;
 
                     reticle.material.color.set(
-                        surfaceValid ? 0x00ff00 : 0xff0000
+                        surfaceValid
+                            ? 0x00ff00
+                            : 0xff0000
                     );
 
                     if (placeRequested) {
@@ -248,7 +288,9 @@ function loseTracking() {
 function placeTable(hit, pose) {
     const table = createCoffeeTable();
 
-    table.matrix.fromArray(pose.transform.matrix);
+    table.matrix.fromArray(
+        pose.transform.matrix
+    );
 
     table.matrix.decompose(
         table.position,
@@ -270,14 +312,16 @@ function placeTable(hit, pose) {
 function createCoffeeTable() {
     const table = new THREE.Group();
 
-    const woodMaterial = new THREE.MeshStandardMaterial({
-        color: 0x8b5a2b,
-        roughness: 0.7
-    });
+    const woodMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x8b5a2b,
+            roughness: 0.7
+        });
 
     const topThickness = 0.05;
     const legSize = 0.06;
-    const legHeight = TABLE_HEIGHT - topThickness;
+    const legHeight =
+        TABLE_HEIGHT - topThickness;
 
     const top = new THREE.Mesh(
         new THREE.BoxGeometry(
@@ -288,22 +332,41 @@ function createCoffeeTable() {
         woodMaterial
     );
 
-    top.position.y = TABLE_HEIGHT - topThickness / 2;
+    top.position.y =
+        TABLE_HEIGHT - topThickness / 2;
+
     table.add(top);
 
-    const legGeometry = new THREE.BoxGeometry(
-        legSize,
-        legHeight,
-        legSize
-    );
+    const legGeometry =
+        new THREE.BoxGeometry(
+            legSize,
+            legHeight,
+            legSize
+        );
 
     const legY = legHeight / 2;
 
     const positions = [
-        [-TABLE_WIDTH / 2 + legSize, legY, -TABLE_DEPTH / 2 + legSize],
-        [TABLE_WIDTH / 2 - legSize, legY, -TABLE_DEPTH / 2 + legSize],
-        [-TABLE_WIDTH / 2 + legSize, legY, TABLE_DEPTH / 2 - legSize],
-        [TABLE_WIDTH / 2 - legSize, legY, TABLE_DEPTH / 2 - legSize]
+        [
+            -TABLE_WIDTH / 2 + legSize,
+            legY,
+            -TABLE_DEPTH / 2 + legSize
+        ],
+        [
+            TABLE_WIDTH / 2 - legSize,
+            legY,
+            -TABLE_DEPTH / 2 + legSize
+        ],
+        [
+            -TABLE_WIDTH / 2 + legSize,
+            legY,
+            TABLE_DEPTH / 2 - legSize
+        ],
+        [
+            TABLE_WIDTH / 2 - legSize,
+            legY,
+            TABLE_DEPTH / 2 - legSize
+        ]
     ];
 
     for (const position of positions) {
@@ -325,12 +388,16 @@ function createCoffeeTable() {
 }
 
 async function createAnchorForTable(hit, table) {
-    if (!anchorsEnabled || typeof hit.createAnchor !== "function") {
+    if (
+        !anchorsEnabled ||
+        typeof hit.createAnchor !== "function"
+    ) {
         return;
     }
 
     try {
-        const anchor = await hit.createAnchor();
+        const anchor =
+            await hit.createAnchor();
 
         if (!placed.includes(table)) {
             anchor.delete();
@@ -341,8 +408,11 @@ async function createAnchorForTable(hit, table) {
             anchor: anchor,
             table: table
         });
+
     } catch (error) {
-        console.log("Anchor unavailable, using normal placement.");
+        console.log(
+            "Anchor unavailable, using normal placement."
+        );
     }
 }
 
@@ -406,9 +476,10 @@ function updateStatus() {
         ? "running"
         : "stopped";
 
-    const angleText = reticle && reticle.visible
-        ? surfaceAngle.toFixed(1) + "°"
-        : "-";
+    const angleText =
+        reticle && reticle.visible
+            ? surfaceAngle.toFixed(1) + "°"
+            : "-";
 
     status.innerHTML =
         "ID: 241482<br>" +
@@ -416,8 +487,13 @@ function updateStatus() {
         "Session: " + sessionState + "<br>" +
         "Reticle: " + reticleState + "<br>" +
         "Angle: " + angleText + "<br>" +
-        "Anchors: " + (anchorsEnabled ? "ON" : "OFF") + "<br>" +
-        "Products: " + placed.length + " / " + MAX_TABLES;
+        "Anchors: " +
+        (anchorsEnabled ? "ON" : "OFF") +
+        "<br>" +
+        "Products: " +
+        placed.length +
+        " / " +
+        MAX_TABLES;
 }
 
 function onSessionEnd() {
