@@ -1,6 +1,5 @@
 import * as THREE from "three";
 
-let btn;
 let gl;
 let glCanvas;
 let camera;
@@ -14,13 +13,9 @@ let viewerSpace = null;
 let localSpace = null;
 
 let placeRequested = false;
-let placeRequestTime = 0;
-
 let surfaceValid = false;
 let surfaceAngle = 0;
 let anchorsEnabled = false;
-
-let tapCount = 0;
 
 const placed = [];
 const anchors = [];
@@ -30,21 +25,27 @@ const TABLE_DEPTH = 0.5;
 const TABLE_HEIGHT = 0.45;
 
 const MAX_TABLES = 5;
-const MAX_PLACE_WAIT = 1500;
 
 const status = document.getElementById("status");
 const clearButton = document.getElementById("clear");
-const overlay = document.getElementById("overlay");
+const arButton = document.getElementById("arButton");
+const fallback = document.getElementById("fallback");
 
-loadScene();
+init();
 
-function loadScene() {
+function init() {
     glCanvas = document.createElement("canvas");
 
     gl = glCanvas.getContext("webgl2", {
         xrCompatible: true,
         alpha: true
     });
+
+    if (!gl) {
+        fallback.hidden = false;
+        fallback.textContent = "WebGL2 is not available.";
+        return;
+    }
 
     document.body.appendChild(glCanvas);
 
@@ -63,6 +64,10 @@ function loadScene() {
         alpha: true
     });
 
+    renderer.setPixelRatio(
+        Math.min(window.devicePixelRatio, 2)
+    );
+
     renderer.setSize(
         window.innerWidth,
         window.innerHeight
@@ -70,11 +75,57 @@ function loadScene() {
 
     renderer.xr.enabled = true;
 
-    const hemiLight = new THREE.HemisphereLight(
-        0xffffff,
-        0xbbbbff,
-        2
+    createLights();
+    createReticle();
+
+    arButton.addEventListener(
+        "click",
+        onARButton
     );
+
+    clearButton.addEventListener(
+        "click",
+        clearProducts
+    );
+
+    /*
+        IMPORTANT:
+        beforexrselect must only block XR selection
+        when the user touches an actual UI button.
+
+        It must NOT be attached to the whole overlay.
+    */
+
+    clearButton.addEventListener(
+        "beforexrselect",
+        function (event) {
+            event.preventDefault();
+        }
+    );
+
+    arButton.addEventListener(
+        "beforexrselect",
+        function (event) {
+            event.preventDefault();
+        }
+    );
+
+    window.addEventListener(
+        "resize",
+        onResize
+    );
+
+    updateStatus();
+    checkARSupport();
+}
+
+function createLights() {
+    const hemiLight =
+        new THREE.HemisphereLight(
+            0xffffff,
+            0x444444,
+            2
+        );
 
     scene.add(hemiLight);
 
@@ -84,56 +135,49 @@ function loadScene() {
             2
         );
 
-    directionalLight.position.set(1, 2, 1);
-    scene.add(directionalLight);
+    directionalLight.position.set(
+        1,
+        2,
+        1
+    );
 
-    const reticleGeometry =
+    scene.add(directionalLight);
+}
+
+function createReticle() {
+    const geometry =
         new THREE.RingGeometry(
             0.06,
             0.08,
             32
         );
 
-    reticleGeometry.rotateX(-Math.PI / 2);
+    geometry.rotateX(
+        -Math.PI / 2
+    );
 
-    const reticleMaterial =
+    const material =
         new THREE.MeshBasicMaterial({
             color: 0x00ff00
         });
 
-    reticle = new THREE.Mesh(
-        reticleGeometry,
-        reticleMaterial
-    );
+    reticle =
+        new THREE.Mesh(
+            geometry,
+            material
+        );
 
     reticle.matrixAutoUpdate = false;
     reticle.visible = false;
 
     scene.add(reticle);
-
-    clearButton.addEventListener(
-        "click",
-        clearProducts
-    );
-
-    overlay.addEventListener(
-        "beforexrselect",
-        function (event) {
-            event.preventDefault();
-        }
-    );
-
-    updateStatus();
-    checkARSupport();
 }
 
 async function checkARSupport() {
-    const fallback =
-        document.getElementById("fallback");
-
     if (!navigator.xr) {
-        fallback.hidden = false;
+        arButton.disabled = true;
 
+        fallback.hidden = false;
         fallback.textContent =
             "WebXR is not supported on this device.";
 
@@ -146,41 +190,25 @@ async function checkARSupport() {
                 "immersive-ar"
             );
 
-        if (supported) {
-            btn =
-                document.createElement(
-                    "button"
-                );
+        if (!supported) {
+            arButton.disabled = true;
 
-            btn.textContent =
-                "START AR";
-
-            btn.addEventListener(
-                "click",
-                onRequestSession
-            );
-
-            document.body.appendChild(
-                btn
-            );
-
-        } else {
             fallback.hidden = false;
-
             fallback.textContent =
                 "Immersive AR is not supported on this device.";
         }
 
     } catch (error) {
-        fallback.hidden = false;
+        arButton.disabled = true;
 
+        fallback.hidden = false;
         fallback.textContent =
             "AR support check failed: " +
             error.message;
     }
 }
 
-async function onRequestSession() {
+async function onARButton() {
     if (xrSession) {
         await xrSession.end();
         return;
@@ -204,7 +232,10 @@ async function onRequestSession() {
                     ],
 
                     domOverlay: {
-                        root: overlay
+                        root:
+                            document.getElementById(
+                                "overlay"
+                            )
                     }
                 }
             );
@@ -235,14 +266,17 @@ async function onSessionStarted(session) {
         onSessionEnd
     );
 
-    session.addEventListener(
-        "selectstart",
-        requestPlacement
-    );
+    /*
+        On Android WebXR a screen tap
+        generates the select event.
+
+        We ONLY set the request here.
+        Placement happens in render().
+    */
 
     session.addEventListener(
         "select",
-        requestPlacement
+        onSelect
     );
 
     renderer.xr.setReferenceSpaceType(
@@ -267,9 +301,7 @@ async function onSessionStarted(session) {
         anchorsEnabled =
             Array.from(
                 session.enabledFeatures
-            ).includes(
-                "anchors"
-            );
+            ).includes("anchors");
     } else {
         anchorsEnabled = false;
     }
@@ -279,102 +311,73 @@ async function onSessionStarted(session) {
             space: viewerSpace
         });
 
-    btn.textContent =
+    arButton.textContent =
         "STOP AR";
-
-    updateStatus();
 
     renderer.setAnimationLoop(
         render
     );
+
+    updateStatus();
 }
 
-function requestPlacement() {
-    /*
-        selectstart and select may both fire
-        for one physical tap.
-
-        Only count/request once until the
-        current request has been processed.
-    */
-
-    if (!placeRequested) {
-        tapCount++;
-
-        placeRequested = true;
-        placeRequestTime =
-            performance.now();
-    }
+function onSelect() {
+    placeRequested = true;
 }
 
 function render(time, frame) {
     if (frame && xrSession) {
         updateAnchors(frame);
 
-        let currentHit = null;
-        let currentPose = null;
-
         if (
             hitTestSource &&
             localSpace
         ) {
-            const results =
+            const hitTestResults =
                 frame.getHitTestResults(
                     hitTestSource
                 );
 
             if (
-                results.length > 0
+                hitTestResults.length > 0
             ) {
-                currentHit =
-                    results[0];
+                const hit =
+                    hitTestResults[0];
 
-                currentPose =
-                    currentHit.getPose(
+                const pose =
+                    hit.getPose(
                         localSpace
                     );
-            }
-        }
 
-        if (currentPose) {
-            updateReticle(
-                currentPose
-            );
-        } else {
-            reticle.visible =
-                false;
+                if (pose) {
+                    updateReticle(
+                        pose
+                    );
 
-            surfaceValid =
-                false;
+                    /*
+                        Placement happens here,
+                        on the frame after select.
+                    */
 
-            surfaceAngle =
-                0;
-        }
+                    if (
+                        placeRequested &&
+                        surfaceValid
+                    ) {
+                        placeTable(
+                            hit,
+                            pose
+                        );
 
-        if (placeRequested) {
-            const waitingTime =
-                performance.now() -
-                placeRequestTime;
+                        placeRequested =
+                            false;
+                    }
 
-            if (
-                currentHit &&
-                currentPose &&
-                surfaceValid
-            ) {
-                placeTable(
-                    currentHit,
-                    currentPose
-                );
+                } else {
+                    trackingLost();
+                }
 
-                placeRequested =
-                    false;
-
-            } else if (
-                waitingTime >
-                MAX_PLACE_WAIT
-            ) {
-                placeRequested =
-                    false;
+            } else {
+                trackingLost();
             }
         }
     }
@@ -396,6 +399,11 @@ function updateReticle(pose) {
 
     const matrix =
         pose.transform.matrix;
+
+    /*
+        Y-axis column of the hit pose matrix
+        gives the surface normal.
+    */
 
     const normal =
         new THREE.Vector3(
@@ -428,9 +436,29 @@ function updateReticle(pose) {
     );
 }
 
+function trackingLost() {
+    reticle.visible = false;
+
+    surfaceValid = false;
+    surfaceAngle = 0;
+
+    /*
+        Do NOT clear placeRequested here.
+
+        A slow phone can temporarily lose
+        a hit for one frame immediately
+        after the user taps.
+    */
+}
+
 function placeTable(hit, pose) {
     const table =
         createCoffeeTable();
+
+    /*
+        Variant rule:
+        keep hit pose orientation.
+    */
 
     table.matrix.fromArray(
         pose.transform.matrix
@@ -446,20 +474,26 @@ function placeTable(hit, pose) {
 
     placed.push(table);
 
-    createAnchorForTable(
+    createAnchor(
         hit,
         table
     );
+
+    /*
+        Multi-placement variant:
+        maximum 5 products.
+        The 6th removes the oldest.
+    */
 
     if (
         placed.length >
         MAX_TABLES
     ) {
-        const oldestTable =
+        const oldest =
             placed.shift();
 
         removeTable(
-            oldestTable
+            oldest
         );
     }
 }
@@ -468,10 +502,15 @@ function createCoffeeTable() {
     const table =
         new THREE.Group();
 
-    const woodMaterial =
+    /*
+        Group origin is at the centre
+        of the base on the floor.
+    */
+
+    const material =
         new THREE.MeshStandardMaterial({
             color: 0x8b5a2b,
-            roughness: 0.7,
+            roughness: 0.65,
             metalness: 0
         });
 
@@ -485,6 +524,11 @@ function createCoffeeTable() {
         TABLE_HEIGHT -
         topThickness;
 
+    /*
+        Table top:
+        1.00 m x 0.50 m
+    */
+
     const top =
         new THREE.Mesh(
             new THREE.BoxGeometry(
@@ -492,7 +536,7 @@ function createCoffeeTable() {
                 topThickness,
                 TABLE_DEPTH
             ),
-            woodMaterial
+            material
         );
 
     top.position.y =
@@ -500,6 +544,10 @@ function createCoffeeTable() {
         topThickness / 2;
 
     table.add(top);
+
+    /*
+        Four legs.
+    */
 
     const legGeometry =
         new THREE.BoxGeometry(
@@ -511,48 +559,29 @@ function createCoffeeTable() {
     const legY =
         legHeight / 2;
 
-    const positions = [
-        [
-            -TABLE_WIDTH / 2 +
-                legSize,
-            legY,
-            -TABLE_DEPTH / 2 +
-                legSize
-        ],
+    const x =
+        TABLE_WIDTH / 2 -
+        legSize;
 
-        [
-            TABLE_WIDTH / 2 -
-                legSize,
-            legY,
-            -TABLE_DEPTH / 2 +
-                legSize
-        ],
+    const z =
+        TABLE_DEPTH / 2 -
+        legSize;
 
-        [
-            -TABLE_WIDTH / 2 +
-                legSize,
-            legY,
-            TABLE_DEPTH / 2 -
-                legSize
-        ],
-
-        [
-            TABLE_WIDTH / 2 -
-                legSize,
-            legY,
-            TABLE_DEPTH / 2 -
-                legSize
-        ]
+    const legPositions = [
+        [-x, legY, -z],
+        [ x, legY, -z],
+        [-x, legY,  z],
+        [ x, legY,  z]
     ];
 
     for (
         const position
-        of positions
+        of legPositions
     ) {
         const leg =
             new THREE.Mesh(
                 legGeometry,
-                woodMaterial
+                material
             );
 
         leg.position.set(
@@ -567,7 +596,7 @@ function createCoffeeTable() {
     return table;
 }
 
-async function createAnchorForTable(
+async function createAnchor(
     hit,
     table
 ) {
@@ -583,12 +612,24 @@ async function createAnchorForTable(
         const anchor =
             await hit.createAnchor();
 
+        /*
+            The table may have been removed
+            while the anchor was being created.
+    */
+
         if (
             !placed.includes(
                 table
             )
         ) {
-            anchor.delete();
+            try {
+                anchor.delete();
+            } catch (error) {
+                console.log(
+                    "Anchor already removed."
+                );
+            }
+
             return;
         }
 
@@ -599,7 +640,7 @@ async function createAnchorForTable(
 
     } catch (error) {
         console.log(
-            "Anchor unavailable, using normal placement."
+            "Anchor creation unavailable. Using pose fallback."
         );
     }
 }
@@ -636,17 +677,18 @@ function updateAnchors(frame) {
 function removeTable(table) {
     scene.remove(table);
 
-    const index =
+    const anchorIndex =
         anchors.findIndex(
             item =>
-                item.table ===
-                table
+                item.table === table
         );
 
-    if (index !== -1) {
+    if (
+        anchorIndex !== -1
+    ) {
         try {
             anchors[
-                index
+                anchorIndex
             ].anchor.delete();
 
         } catch (error) {
@@ -656,13 +698,15 @@ function removeTable(table) {
         }
 
         anchors.splice(
-            index,
+            anchorIndex,
             1
         );
     }
 }
 
 function clearProducts() {
+    placeRequested = false;
+
     while (
         placed.length > 0
     ) {
@@ -673,8 +717,6 @@ function clearProducts() {
             table
         );
     }
-
-    placeRequested = false;
 
     updateStatus();
 }
@@ -701,9 +743,8 @@ function updateStatus() {
     const angleText =
         reticle &&
         reticle.visible
-            ? surfaceAngle.toFixed(
-                1
-            ) + "°"
+            ? surfaceAngle.toFixed(1) +
+              "°"
             : "-";
 
     status.innerHTML =
@@ -730,10 +771,6 @@ function updateStatus() {
         ) +
         "<br>" +
 
-        "Taps: " +
-        tapCount +
-        "<br>" +
-
         "Products: " +
         placed.length +
         " / " +
@@ -741,9 +778,15 @@ function updateStatus() {
 }
 
 function onSessionEnd() {
+    renderer.setAnimationLoop(
+        null
+    );
+
     if (hitTestSource) {
         hitTestSource.cancel();
     }
+
+    hitTestSource = null;
 
     for (
         const item
@@ -751,7 +794,6 @@ function onSessionEnd() {
     ) {
         try {
             item.anchor.delete();
-
         } catch (error) {
             console.log(
                 "Anchor already removed."
@@ -762,23 +804,33 @@ function onSessionEnd() {
     anchors.length = 0;
 
     xrSession = null;
-    hitTestSource = null;
     viewerSpace = null;
     localSpace = null;
 
     placeRequested = false;
-    placeRequestTime = 0;
 
     surfaceValid = false;
     surfaceAngle = 0;
-    anchorsEnabled = false;
 
-    tapCount = 0;
+    anchorsEnabled = false;
 
     reticle.visible = false;
 
-    btn.textContent =
+    arButton.textContent =
         "START AR";
 
     updateStatus();
+}
+
+function onResize() {
+    camera.aspect =
+        window.innerWidth /
+        window.innerHeight;
+
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
 }
