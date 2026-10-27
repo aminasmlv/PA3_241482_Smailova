@@ -59,7 +59,11 @@ function loadScene() {
         alpha: true
     });
 
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
+
     renderer.xr.enabled = true;
 
     const hemiLight = new THREE.HemisphereLight(
@@ -67,26 +71,31 @@ function loadScene() {
         0xbbbbff,
         2
     );
+
     scene.add(hemiLight);
 
-    const directionalLight = new THREE.DirectionalLight(
-        0xffffff,
-        2
-    );
+    const directionalLight =
+        new THREE.DirectionalLight(
+            0xffffff,
+            2
+        );
+
     directionalLight.position.set(1, 2, 1);
     scene.add(directionalLight);
 
-    const reticleGeometry = new THREE.RingGeometry(
-        0.06,
-        0.08,
-        32
-    );
+    const reticleGeometry =
+        new THREE.RingGeometry(
+            0.06,
+            0.08,
+            32
+        );
 
     reticleGeometry.rotateX(-Math.PI / 2);
 
-    const reticleMaterial = new THREE.MeshBasicMaterial({
-        color: 0x00ff00
-    });
+    const reticleMaterial =
+        new THREE.MeshBasicMaterial({
+            color: 0x00ff00
+        });
 
     reticle = new THREE.Mesh(
         reticleGeometry,
@@ -95,28 +104,39 @@ function loadScene() {
 
     reticle.matrixAutoUpdate = false;
     reticle.visible = false;
+
     scene.add(reticle);
 
     controller = renderer.xr.getController(0);
 
-    controller.addEventListener("select", function () {
-        placeRequested = true;
-    });
+    controller.addEventListener(
+        "select",
+        function () {
+            placeRequested = true;
+        }
+    );
 
     scene.add(controller);
 
-    clearButton.addEventListener("click", clearProducts);
+    clearButton.addEventListener(
+        "click",
+        clearProducts
+    );
 
-    overlay.addEventListener("beforexrselect", function (event) {
-        event.preventDefault();
-    });
+    overlay.addEventListener(
+        "beforexrselect",
+        function (event) {
+            event.preventDefault();
+        }
+    );
 
     updateStatus();
     checkARSupport();
 }
 
 async function checkARSupport() {
-    const fallback = document.getElementById("fallback");
+    const fallback =
+        document.getElementById("fallback");
 
     if (!navigator.xr) {
         fallback.hidden = false;
@@ -127,24 +147,35 @@ async function checkARSupport() {
 
     try {
         const supported =
-            await navigator.xr.isSessionSupported("immersive-ar");
+            await navigator.xr.isSessionSupported(
+                "immersive-ar"
+            );
 
         if (supported) {
             btn = document.createElement("button");
+
             btn.textContent = "START AR";
 
-            btn.addEventListener("click", onRequestSession);
+            btn.addEventListener(
+                "click",
+                onRequestSession
+            );
 
             document.body.appendChild(btn);
+
         } else {
             fallback.hidden = false;
+
             fallback.textContent =
                 "Immersive AR is not supported on this device.";
         }
+
     } catch (error) {
         fallback.hidden = false;
+
         fallback.textContent =
-            "AR support check failed: " + error.message;
+            "AR support check failed: " +
+            error.message;
     }
 }
 
@@ -158,22 +189,36 @@ async function onRequestSession() {
         status.innerHTML = "Starting AR...";
 
         const session =
-            await navigator.xr.requestSession("immersive-ar", {
-                requiredFeatures: ["hit-test"],
-                optionalFeatures: ["anchors", "dom-overlay"],
-                domOverlay: {
-                    root: overlay
+            await navigator.xr.requestSession(
+                "immersive-ar",
+                {
+                    requiredFeatures: [
+                        "hit-test"
+                    ],
+
+                    optionalFeatures: [
+                        "anchors",
+                        "dom-overlay"
+                    ],
+
+                    domOverlay: {
+                        root: overlay
+                    }
                 }
-            });
+            );
 
         await onSessionStarted(session);
 
     } catch (error) {
-        console.error("AR start error:", error);
+        console.error(
+            "AR start error:",
+            error
+        );
 
         status.innerHTML =
             "AR ERROR:<br>" +
-            error.name + "<br>" +
+            error.name +
+            "<br>" +
             error.message;
     }
 }
@@ -181,20 +226,34 @@ async function onRequestSession() {
 async function onSessionStarted(session) {
     xrSession = session;
 
-    session.addEventListener("end", onSessionEnd);
+    session.addEventListener(
+        "end",
+        onSessionEnd
+    );
 
     renderer.xr.setReferenceSpaceType("local");
+
     await renderer.xr.setSession(session);
 
     viewerSpace =
-        await session.requestReferenceSpace("viewer");
+        await session.requestReferenceSpace(
+            "viewer"
+        );
 
     localSpace =
-        await session.requestReferenceSpace("local");
+        await session.requestReferenceSpace(
+            "local"
+        );
 
-    anchorsEnabled = session.enabledFeatures
-        ? session.enabledFeatures.has("anchors")
-        : false;
+    // Fixed for Chrome/Android compatibility
+    if (session.enabledFeatures) {
+        anchorsEnabled =
+            Array.from(
+                session.enabledFeatures
+            ).includes("anchors");
+    } else {
+        anchorsEnabled = false;
+    }
 
     hitTestSource =
         await session.requestHitTestSource({
@@ -217,16 +276,21 @@ function render(time, frame) {
 
         if (hitTestSource && localSpace) {
             const results =
-                frame.getHitTestResults(hitTestSource);
+                frame.getHitTestResults(
+                    hitTestSource
+                );
 
             if (results.length > 0) {
                 const hit = results[0];
-                const pose = hit.getPose(localSpace);
+
+                const pose =
+                    hit.getPose(localSpace);
 
                 if (pose) {
                     currentHit = hit;
 
                     reticle.visible = true;
+
                     reticle.matrix.fromArray(
                         pose.transform.matrix
                     );
@@ -234,18 +298,25 @@ function render(time, frame) {
                     const matrix =
                         pose.transform.matrix;
 
-                    const normal = new THREE.Vector3(
-                        matrix[4],
-                        matrix[5],
-                        matrix[6]
-                    ).normalize();
+                    const normal =
+                        new THREE.Vector3(
+                            matrix[4],
+                            matrix[5],
+                            matrix[6]
+                        ).normalize();
 
                     const worldUp =
-                        new THREE.Vector3(0, 1, 0);
+                        new THREE.Vector3(
+                            0,
+                            1,
+                            0
+                        );
 
                     surfaceAngle =
                         THREE.MathUtils.radToDeg(
-                            normal.angleTo(worldUp)
+                            normal.angleTo(
+                                worldUp
+                            )
                         );
 
                     surfaceValid =
@@ -259,14 +330,19 @@ function render(time, frame) {
 
                     if (placeRequested) {
                         if (surfaceValid) {
-                            placeTable(hit, pose);
+                            placeTable(
+                                hit,
+                                pose
+                            );
                         }
 
                         placeRequested = false;
                     }
+
                 } else {
                     loseTracking();
                 }
+
             } else {
                 loseTracking();
             }
@@ -274,11 +350,16 @@ function render(time, frame) {
     }
 
     updateStatus();
-    renderer.render(scene, camera);
+
+    renderer.render(
+        scene,
+        camera
+    );
 }
 
 function loseTracking() {
     reticle.visible = false;
+
     surfaceValid = false;
     surfaceAngle = 0;
     currentHit = null;
@@ -286,7 +367,8 @@ function loseTracking() {
 }
 
 function placeTable(hit, pose) {
-    const table = createCoffeeTable();
+    const table =
+        createCoffeeTable();
 
     table.matrix.fromArray(
         pose.transform.matrix
@@ -299,18 +381,25 @@ function placeTable(hit, pose) {
     );
 
     scene.add(table);
+
     placed.push(table);
 
-    createAnchorForTable(hit, table);
+    createAnchorForTable(
+        hit,
+        table
+    );
 
     if (placed.length > MAX_TABLES) {
-        const oldestTable = placed.shift();
+        const oldestTable =
+            placed.shift();
+
         removeTable(oldestTable);
     }
 }
 
 function createCoffeeTable() {
-    const table = new THREE.Group();
+    const table =
+        new THREE.Group();
 
     const woodMaterial =
         new THREE.MeshStandardMaterial({
@@ -320,20 +409,24 @@ function createCoffeeTable() {
 
     const topThickness = 0.05;
     const legSize = 0.06;
-    const legHeight =
-        TABLE_HEIGHT - topThickness;
 
-    const top = new THREE.Mesh(
-        new THREE.BoxGeometry(
-            TABLE_WIDTH,
-            topThickness,
-            TABLE_DEPTH
-        ),
-        woodMaterial
-    );
+    const legHeight =
+        TABLE_HEIGHT -
+        topThickness;
+
+    const top =
+        new THREE.Mesh(
+            new THREE.BoxGeometry(
+                TABLE_WIDTH,
+                topThickness,
+                TABLE_DEPTH
+            ),
+            woodMaterial
+        );
 
     top.position.y =
-        TABLE_HEIGHT - topThickness / 2;
+        TABLE_HEIGHT -
+        topThickness / 2;
 
     table.add(top);
 
@@ -344,7 +437,8 @@ function createCoffeeTable() {
             legSize
         );
 
-    const legY = legHeight / 2;
+    const legY =
+        legHeight / 2;
 
     const positions = [
         [
@@ -352,16 +446,19 @@ function createCoffeeTable() {
             legY,
             -TABLE_DEPTH / 2 + legSize
         ],
+
         [
             TABLE_WIDTH / 2 - legSize,
             legY,
             -TABLE_DEPTH / 2 + legSize
         ],
+
         [
             -TABLE_WIDTH / 2 + legSize,
             legY,
             TABLE_DEPTH / 2 - legSize
         ],
+
         [
             TABLE_WIDTH / 2 - legSize,
             legY,
@@ -370,10 +467,11 @@ function createCoffeeTable() {
     ];
 
     for (const position of positions) {
-        const leg = new THREE.Mesh(
-            legGeometry,
-            woodMaterial
-        );
+        const leg =
+            new THREE.Mesh(
+                legGeometry,
+                woodMaterial
+            );
 
         leg.position.set(
             position[0],
@@ -387,10 +485,14 @@ function createCoffeeTable() {
     return table;
 }
 
-async function createAnchorForTable(hit, table) {
+async function createAnchorForTable(
+    hit,
+    table
+) {
     if (
         !anchorsEnabled ||
-        typeof hit.createAnchor !== "function"
+        typeof hit.createAnchor !==
+            "function"
     ) {
         return;
     }
@@ -422,10 +524,11 @@ function updateAnchors(frame) {
     }
 
     for (const item of anchors) {
-        const pose = frame.getPose(
-            item.anchor.anchorSpace,
-            localSpace
-        );
+        const pose =
+            frame.getPose(
+                item.anchor.anchorSpace,
+                localSpace
+            );
 
         if (pose) {
             item.table.matrix.fromArray(
@@ -444,19 +547,27 @@ function updateAnchors(frame) {
 function removeTable(table) {
     scene.remove(table);
 
-    const index = anchors.findIndex(
-        item => item.table === table
-    );
+    const index =
+        anchors.findIndex(
+            item =>
+                item.table === table
+        );
 
     if (index !== -1) {
         anchors[index].anchor.delete();
-        anchors.splice(index, 1);
+
+        anchors.splice(
+            index,
+            1
+        );
     }
 }
 
 function clearProducts() {
     while (placed.length > 0) {
-        const table = placed.pop();
+        const table =
+            placed.pop();
+
         removeTable(table);
     }
 
@@ -466,29 +577,44 @@ function clearProducts() {
 function updateStatus() {
     let reticleState = "none";
 
-    if (reticle && reticle.visible) {
-        reticleState = surfaceValid
-            ? "valid"
-            : "too tilted";
+    if (
+        reticle &&
+        reticle.visible
+    ) {
+        reticleState =
+            surfaceValid
+                ? "valid"
+                : "too tilted";
     }
 
-    const sessionState = xrSession
-        ? "running"
-        : "stopped";
+    const sessionState =
+        xrSession
+            ? "running"
+            : "stopped";
 
     const angleText =
-        reticle && reticle.visible
-            ? surfaceAngle.toFixed(1) + "°"
+        reticle &&
+        reticle.visible
+            ? surfaceAngle.toFixed(1) +
+              "°"
             : "-";
 
     status.innerHTML =
         "ID: 241482<br>" +
         "Variant: Coffee Table<br>" +
-        "Session: " + sessionState + "<br>" +
-        "Reticle: " + reticleState + "<br>" +
-        "Angle: " + angleText + "<br>" +
+        "Session: " +
+        sessionState +
+        "<br>" +
+        "Reticle: " +
+        reticleState +
+        "<br>" +
+        "Angle: " +
+        angleText +
+        "<br>" +
         "Anchors: " +
-        (anchorsEnabled ? "ON" : "OFF") +
+        (anchorsEnabled
+            ? "ON"
+            : "OFF") +
         "<br>" +
         "Products: " +
         placed.length +
