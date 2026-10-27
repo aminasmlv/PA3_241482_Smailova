@@ -11,15 +11,26 @@ let reticle;
 
 let xrSession = null;
 let hitTestSource = null;
-let hitTestSourceRequested = false;
 let viewerSpace = null;
 let localSpace = null;
 
 let placeRequested = false;
 let surfaceValid = false;
 let surfaceAngle = 0;
+let currentHit = null;
+let anchorsEnabled = false;
 
 const placed = [];
+const anchors = [];
+
+const TABLE_WIDTH = 1.0;
+const TABLE_DEPTH = 0.5;
+const TABLE_HEIGHT = 0.45;
+const MAX_TABLES = 5;
+
+const status = document.getElementById("status");
+const clearButton = document.getElementById("clear");
+const overlay = document.getElementById("overlay");
 
 loadScene();
 
@@ -65,19 +76,41 @@ function loadScene() {
     directionalLight.position.set(1, 2, 1);
     scene.add(directionalLight);
 
-    const reticleGeometry = new THREE.RingGeometry(0.06, 0.08, 32);
+    const reticleGeometry = new THREE.RingGeometry(
+        0.06,
+        0.08,
+        32
+    );
     reticleGeometry.rotateX(-Math.PI / 2);
 
     const reticleMaterial = new THREE.MeshBasicMaterial({
         color: 0x00ff00
     });
 
-    reticle = new THREE.Mesh(reticleGeometry, reticleMaterial);
+    reticle = new THREE.Mesh(
+        reticleGeometry,
+        reticleMaterial
+    );
+
     reticle.matrixAutoUpdate = false;
     reticle.visible = false;
-
     scene.add(reticle);
 
+    controller = renderer.xr.getController(0);
+
+    controller.addEventListener("select", function () {
+        placeRequested = true;
+    });
+
+    scene.add(controller);
+
+    clearButton.addEventListener("click", clearProducts);
+
+    overlay.addEventListener("beforexrselect", function (event) {
+        event.preventDefault();
+    });
+
+    updateStatus();
     checkARSupport();
 }
 
@@ -109,8 +142,6 @@ async function onRequestSession() {
         return;
     }
 
-    const overlay = document.getElementById("overlay");
-
     const session = await navigator.xr.requestSession("immersive-ar", {
         requiredFeatures: ["hit-test"],
         optionalFeatures: ["anchors", "dom-overlay"],
@@ -131,8 +162,17 @@ async function onSessionStarted(session) {
     viewerSpace = await session.requestReferenceSpace("viewer");
     localSpace = await session.requestReferenceSpace("local");
 
+    anchorsEnabled = session.enabledFeatures
+        ? session.enabledFeatures.has("anchors")
+        : false;
+
+    hitTestSource = await session.requestHitTestSource({
+        space: viewerSpace
+    });
+
     btn.textContent = "STOP AR";
 
+    updateStatus();
     animate();
 }
 
@@ -142,25 +182,18 @@ function animate() {
 
 function render(time, frame) {
     if (frame && xrSession) {
-
-        if (!hitTestSourceRequested && viewerSpace) {
-            xrSession.requestHitTestSource({
-                space: viewerSpace
-            }).then((source) => {
-                hitTestSource = source;
-            });
-
-            hitTestSourceRequested = true;
-        }
+        updateAnchors(frame);
 
         if (hitTestSource && localSpace) {
-            const hitTestResults = frame.getHitTestResults(hitTestSource);
+            const results = frame.getHitTestResults(hitTestSource);
 
-            if (hitTestResults.length > 0) {
-                const hit = hitTestResults[0];
+            if (results.length > 0) {
+                const hit = results[0];
                 const pose = hit.getPose(localSpace);
 
                 if (pose) {
+                    currentHit = hit;
+
                     reticle.visible = true;
                     reticle.matrix.fromArray(pose.transform.matrix);
 
@@ -180,20 +213,211 @@ function render(time, frame) {
 
                     surfaceValid = surfaceAngle <= 12;
 
-                    if (surfaceValid) {
-                        reticle.material.color.set(0x00ff00);
-                    } else {
-                        reticle.material.color.set(0xff0000);
+                    reticle.material.color.set(
+                        surfaceValid ? 0x00ff00 : 0xff0000
+                    );
+
+                    if (placeRequested) {
+                        if (surfaceValid) {
+                            placeTable(hit, pose);
+                        }
+
+                        placeRequested = false;
                     }
+                } else {
+                    loseTracking();
                 }
             } else {
-                reticle.visible = false;
-                surfaceValid = false;
+                loseTracking();
             }
         }
     }
 
+    updateStatus();
     renderer.render(scene, camera);
+}
+
+function loseTracking() {
+    reticle.visible = false;
+    surfaceValid = false;
+    surfaceAngle = 0;
+    currentHit = null;
+    placeRequested = false;
+}
+
+function placeTable(hit, pose) {
+    const table = createCoffeeTable();
+
+    table.matrix.fromArray(pose.transform.matrix);
+
+    table.matrix.decompose(
+        table.position,
+        table.quaternion,
+        table.scale
+    );
+
+    scene.add(table);
+    placed.push(table);
+
+    createAnchorForTable(hit, table);
+
+    if (placed.length > MAX_TABLES) {
+        const oldestTable = placed.shift();
+        removeTable(oldestTable);
+    }
+}
+
+function createCoffeeTable() {
+    const table = new THREE.Group();
+
+    const woodMaterial = new THREE.MeshStandardMaterial({
+        color: 0x8b5a2b,
+        roughness: 0.7
+    });
+
+    const topThickness = 0.05;
+    const legSize = 0.06;
+    const legHeight = TABLE_HEIGHT - topThickness;
+
+    const top = new THREE.Mesh(
+        new THREE.BoxGeometry(
+            TABLE_WIDTH,
+            topThickness,
+            TABLE_DEPTH
+        ),
+        woodMaterial
+    );
+
+    top.position.y = TABLE_HEIGHT - topThickness / 2;
+    table.add(top);
+
+    const legGeometry = new THREE.BoxGeometry(
+        legSize,
+        legHeight,
+        legSize
+    );
+
+    const legY = legHeight / 2;
+
+    const positions = [
+        [-TABLE_WIDTH / 2 + legSize, legY, -TABLE_DEPTH / 2 + legSize],
+        [TABLE_WIDTH / 2 - legSize, legY, -TABLE_DEPTH / 2 + legSize],
+        [-TABLE_WIDTH / 2 + legSize, legY, TABLE_DEPTH / 2 - legSize],
+        [TABLE_WIDTH / 2 - legSize, legY, TABLE_DEPTH / 2 - legSize]
+    ];
+
+    for (const position of positions) {
+        const leg = new THREE.Mesh(
+            legGeometry,
+            woodMaterial
+        );
+
+        leg.position.set(
+            position[0],
+            position[1],
+            position[2]
+        );
+
+        table.add(leg);
+    }
+
+    return table;
+}
+
+async function createAnchorForTable(hit, table) {
+    if (!anchorsEnabled || typeof hit.createAnchor !== "function") {
+        return;
+    }
+
+    try {
+        const anchor = await hit.createAnchor();
+
+        if (!placed.includes(table)) {
+            anchor.delete();
+            return;
+        }
+
+        anchors.push({
+            anchor: anchor,
+            table: table
+        });
+    } catch (error) {
+        console.log("Anchor unavailable, using normal placement.");
+    }
+}
+
+function updateAnchors(frame) {
+    if (!localSpace) {
+        return;
+    }
+
+    for (const item of anchors) {
+        const pose = frame.getPose(
+            item.anchor.anchorSpace,
+            localSpace
+        );
+
+        if (pose) {
+            item.table.matrix.fromArray(
+                pose.transform.matrix
+            );
+
+            item.table.matrix.decompose(
+                item.table.position,
+                item.table.quaternion,
+                item.table.scale
+            );
+        }
+    }
+}
+
+function removeTable(table) {
+    scene.remove(table);
+
+    const index = anchors.findIndex(
+        item => item.table === table
+    );
+
+    if (index !== -1) {
+        anchors[index].anchor.delete();
+        anchors.splice(index, 1);
+    }
+}
+
+function clearProducts() {
+    while (placed.length > 0) {
+        const table = placed.pop();
+        removeTable(table);
+    }
+
+    updateStatus();
+}
+
+function updateStatus() {
+    let reticleState = "none";
+
+    if (reticle && reticle.visible) {
+        reticleState = surfaceValid
+            ? "valid"
+            : "too tilted";
+    }
+
+    const sessionState = xrSession
+        ? "running"
+        : "stopped";
+
+    const angleText = reticle && reticle.visible
+        ? surfaceAngle.toFixed(1) + "°"
+        : "-";
+
+    status.innerHTML =
+        "ID: 241482<br>" +
+        "Variant: Coffee Table<br>" +
+        "Session: " + sessionState + "<br>" +
+        "Reticle: " + reticleState + "<br>" +
+        "Angle: " + angleText + "<br>" +
+        "Anchors: " + (anchorsEnabled ? "ON" : "OFF") + "<br>" +
+        "Products: " + placed.length + " / " + MAX_TABLES;
 }
 
 function onSessionEnd() {
@@ -201,16 +425,26 @@ function onSessionEnd() {
         hitTestSource.cancel();
     }
 
+    for (const item of anchors) {
+        item.anchor.delete();
+    }
+
+    anchors.length = 0;
+
     xrSession = null;
     hitTestSource = null;
-    hitTestSourceRequested = false;
     viewerSpace = null;
     localSpace = null;
+
     placeRequested = false;
     surfaceValid = false;
     surfaceAngle = 0;
+    currentHit = null;
+    anchorsEnabled = false;
 
     reticle.visible = false;
 
     btn.textContent = "START AR";
+
+    updateStatus();
 }
