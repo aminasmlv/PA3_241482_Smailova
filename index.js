@@ -6,7 +6,6 @@ let glCanvas;
 let camera;
 let scene;
 let renderer;
-let controller;
 let reticle;
 
 let xrSession = null;
@@ -17,7 +16,6 @@ let localSpace = null;
 let placeRequested = false;
 let surfaceValid = false;
 let surfaceAngle = 0;
-let currentHit = null;
 let anchorsEnabled = false;
 
 const placed = [];
@@ -107,17 +105,6 @@ function loadScene() {
 
     scene.add(reticle);
 
-    controller = renderer.xr.getController(0);
-
-    controller.addEventListener(
-        "select",
-        function () {
-            placeRequested = true;
-        }
-    );
-
-    scene.add(controller);
-
     clearButton.addEventListener(
         "click",
         clearProducts
@@ -165,7 +152,6 @@ async function checkARSupport() {
 
         } else {
             fallback.hidden = false;
-
             fallback.textContent =
                 "Immersive AR is not supported on this device.";
         }
@@ -232,12 +218,17 @@ async function onSessionStarted(session) {
         onSessionEnd
     );
 
-    // Mobile WebXR tap/select
+    /*
+        On Android handheld AR, touching the screen
+        creates an XR select interaction.
+
+        We only request placement here.
+        The object is created later inside render()
+        using the current hit-test result.
+    */
     session.addEventListener(
-        "select",
-        function () {
-            placeRequested = true;
-        }
+        "selectstart",
+        onXRSelect
     );
 
     renderer.xr.setReferenceSpaceType(
@@ -278,6 +269,10 @@ async function onSessionStarted(session) {
     animate();
 }
 
+function onXRSelect() {
+    placeRequested = true;
+}
+
 function animate() {
     renderer.setAnimationLoop(
         render
@@ -298,8 +293,7 @@ function render(time, frame) {
                 );
 
             if (results.length > 0) {
-                const hit =
-                    results[0];
+                const hit = results[0];
 
                 const pose =
                     hit.getPose(
@@ -307,8 +301,6 @@ function render(time, frame) {
                     );
 
                 if (pose) {
-                    currentHit = hit;
-
                     reticle.visible = true;
 
                     reticle.matrix.fromArray(
@@ -356,8 +348,7 @@ function render(time, frame) {
                             );
                         }
 
-                        placeRequested =
-                            false;
+                        placeRequested = false;
                     }
 
                 } else {
@@ -380,11 +371,12 @@ function render(time, frame) {
 
 function loseTracking() {
     reticle.visible = false;
-
     surfaceValid = false;
     surfaceAngle = 0;
-    currentHit = null;
-    placeRequested = false;
+
+    if (placeRequested) {
+        placeRequested = false;
+    }
 }
 
 function placeTable(hit, pose) {
@@ -430,14 +422,12 @@ function createCoffeeTable() {
     const woodMaterial =
         new THREE.MeshStandardMaterial({
             color: 0x8b5a2b,
-            roughness: 0.7
+            roughness: 0.7,
+            metalness: 0
         });
 
-    const topThickness =
-        0.05;
-
-    const legSize =
-        0.06;
+    const topThickness = 0.05;
+    const legSize = 0.06;
 
     const legHeight =
         TABLE_HEIGHT -
@@ -471,42 +461,28 @@ function createCoffeeTable() {
 
     const positions = [
         [
-            -TABLE_WIDTH / 2 +
-                legSize,
+            -TABLE_WIDTH / 2 + legSize,
             legY,
-            -TABLE_DEPTH / 2 +
-                legSize
+            -TABLE_DEPTH / 2 + legSize
         ],
-
         [
-            TABLE_WIDTH / 2 -
-                legSize,
+            TABLE_WIDTH / 2 - legSize,
             legY,
-            -TABLE_DEPTH / 2 +
-                legSize
+            -TABLE_DEPTH / 2 + legSize
         ],
-
         [
-            -TABLE_WIDTH / 2 +
-                legSize,
+            -TABLE_WIDTH / 2 + legSize,
             legY,
-            TABLE_DEPTH / 2 -
-                legSize
+            TABLE_DEPTH / 2 - legSize
         ],
-
         [
-            TABLE_WIDTH / 2 -
-                legSize,
+            TABLE_WIDTH / 2 - legSize,
             legY,
-            TABLE_DEPTH / 2 -
-                legSize
+            TABLE_DEPTH / 2 - legSize
         ]
     ];
 
-    for (
-        const position
-        of positions
-    ) {
+    for (const position of positions) {
         const leg =
             new THREE.Mesh(
                 legGeometry,
@@ -567,10 +543,7 @@ function updateAnchors(frame) {
         return;
     }
 
-    for (
-        const item
-        of anchors
-    ) {
+    for (const item of anchors) {
         const pose =
             frame.getPose(
                 item.anchor.anchorSpace,
@@ -597,14 +570,19 @@ function removeTable(table) {
     const index =
         anchors.findIndex(
             item =>
-                item.table ===
-                table
+                item.table === table
         );
 
     if (index !== -1) {
-        anchors[
-            index
-        ].anchor.delete();
+        try {
+            anchors[
+                index
+            ].anchor.delete();
+        } catch (error) {
+            console.log(
+                "Anchor already removed."
+            );
+        }
 
         anchors.splice(
             index,
@@ -684,11 +662,14 @@ function onSessionEnd() {
         hitTestSource.cancel();
     }
 
-    for (
-        const item
-        of anchors
-    ) {
-        item.anchor.delete();
+    for (const item of anchors) {
+        try {
+            item.anchor.delete();
+        } catch (error) {
+            console.log(
+                "Anchor already removed."
+            );
+        }
     }
 
     anchors.length = 0;
@@ -701,7 +682,6 @@ function onSessionEnd() {
     placeRequested = false;
     surfaceValid = false;
     surfaceAngle = 0;
-    currentHit = null;
     anchorsEnabled = false;
 
     reticle.visible = false;
