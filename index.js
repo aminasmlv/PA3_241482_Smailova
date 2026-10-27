@@ -186,7 +186,8 @@ async function onRequestSession() {
     }
 
     try {
-        status.innerHTML = "Starting AR...";
+        status.innerHTML =
+            "Starting AR...";
 
         const session =
             await navigator.xr.requestSession(
@@ -231,9 +232,21 @@ async function onSessionStarted(session) {
         onSessionEnd
     );
 
-    renderer.xr.setReferenceSpaceType("local");
+    // Mobile WebXR tap/select
+    session.addEventListener(
+        "select",
+        function () {
+            placeRequested = true;
+        }
+    );
 
-    await renderer.xr.setSession(session);
+    renderer.xr.setReferenceSpaceType(
+        "local"
+    );
+
+    await renderer.xr.setSession(
+        session
+    );
 
     viewerSpace =
         await session.requestReferenceSpace(
@@ -245,7 +258,6 @@ async function onSessionStarted(session) {
             "local"
         );
 
-    // Fixed for Chrome/Android compatibility
     if (session.enabledFeatures) {
         anchorsEnabled =
             Array.from(
@@ -267,24 +279,32 @@ async function onSessionStarted(session) {
 }
 
 function animate() {
-    renderer.setAnimationLoop(render);
+    renderer.setAnimationLoop(
+        render
+    );
 }
 
 function render(time, frame) {
     if (frame && xrSession) {
         updateAnchors(frame);
 
-        if (hitTestSource && localSpace) {
+        if (
+            hitTestSource &&
+            localSpace
+        ) {
             const results =
                 frame.getHitTestResults(
                     hitTestSource
                 );
 
             if (results.length > 0) {
-                const hit = results[0];
+                const hit =
+                    results[0];
 
                 const pose =
-                    hit.getPose(localSpace);
+                    hit.getPose(
+                        localSpace
+                    );
 
                 if (pose) {
                     currentHit = hit;
@@ -336,7 +356,8 @@ function render(time, frame) {
                             );
                         }
 
-                        placeRequested = false;
+                        placeRequested =
+                            false;
                     }
 
                 } else {
@@ -389,11 +410,16 @@ function placeTable(hit, pose) {
         table
     );
 
-    if (placed.length > MAX_TABLES) {
+    if (
+        placed.length >
+        MAX_TABLES
+    ) {
         const oldestTable =
             placed.shift();
 
-        removeTable(oldestTable);
+        removeTable(
+            oldestTable
+        );
     }
 }
 
@@ -407,8 +433,11 @@ function createCoffeeTable() {
             roughness: 0.7
         });
 
-    const topThickness = 0.05;
-    const legSize = 0.06;
+    const topThickness =
+        0.05;
+
+    const legSize =
+        0.06;
 
     const legHeight =
         TABLE_HEIGHT -
@@ -442,31 +471,42 @@ function createCoffeeTable() {
 
     const positions = [
         [
-            -TABLE_WIDTH / 2 + legSize,
+            -TABLE_WIDTH / 2 +
+                legSize,
             legY,
-            -TABLE_DEPTH / 2 + legSize
+            -TABLE_DEPTH / 2 +
+                legSize
         ],
 
         [
-            TABLE_WIDTH / 2 - legSize,
+            TABLE_WIDTH / 2 -
+                legSize,
             legY,
-            -TABLE_DEPTH / 2 + legSize
+            -TABLE_DEPTH / 2 +
+                legSize
         ],
 
         [
-            -TABLE_WIDTH / 2 + legSize,
+            -TABLE_WIDTH / 2 +
+                legSize,
             legY,
-            TABLE_DEPTH / 2 - legSize
+            TABLE_DEPTH / 2 -
+                legSize
         ],
 
         [
-            TABLE_WIDTH / 2 - legSize,
+            TABLE_WIDTH / 2 -
+                legSize,
             legY,
-            TABLE_DEPTH / 2 - legSize
+            TABLE_DEPTH / 2 -
+                legSize
         ]
     ];
 
-    for (const position of positions) {
+    for (
+        const position
+        of positions
+    ) {
         const leg =
             new THREE.Mesh(
                 legGeometry,
@@ -501,7 +541,11 @@ async function createAnchorForTable(
         const anchor =
             await hit.createAnchor();
 
-        if (!placed.includes(table)) {
+        if (
+            !placed.includes(
+                table
+            )
+        ) {
             anchor.delete();
             return;
         }
@@ -523,7 +567,10 @@ function updateAnchors(frame) {
         return;
     }
 
-    for (const item of anchors) {
+    for (
+        const item
+        of anchors
+    ) {
         const pose =
             frame.getPose(
                 item.anchor.anchorSpace,
@@ -550,11 +597,14 @@ function removeTable(table) {
     const index =
         anchors.findIndex(
             item =>
-                item.table === table
+                item.table ===
+                table
         );
 
     if (index !== -1) {
-        anchors[index].anchor.delete();
+        anchors[
+            index
+        ].anchor.delete();
 
         anchors.splice(
             index,
@@ -564,18 +614,23 @@ function removeTable(table) {
 }
 
 function clearProducts() {
-    while (placed.length > 0) {
+    while (
+        placed.length > 0
+    ) {
         const table =
             placed.pop();
 
-        removeTable(table);
+        removeTable(
+            table
+        );
     }
 
     updateStatus();
 }
 
 function updateStatus() {
-    let reticleState = "none";
+    let reticleState =
+        "none";
 
     if (
         reticle &&
@@ -612,9 +667,11 @@ function updateStatus() {
         angleText +
         "<br>" +
         "Anchors: " +
-        (anchorsEnabled
-            ? "ON"
-            : "OFF") +
+        (
+            anchorsEnabled
+                ? "ON"
+                : "OFF"
+        ) +
         "<br>" +
         "Products: " +
         placed.length +
@@ -627,7 +684,10 @@ function onSessionEnd() {
         hitTestSource.cancel();
     }
 
-    for (const item of anchors) {
+    for (
+        const item
+        of anchors
+    ) {
         item.anchor.delete();
     }
 
@@ -646,7 +706,8 @@ function onSessionEnd() {
 
     reticle.visible = false;
 
-    btn.textContent = "START AR";
+    btn.textContent =
+        "START AR";
 
     updateStatus();
 }
