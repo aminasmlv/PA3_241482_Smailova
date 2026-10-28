@@ -17,6 +17,13 @@ let surfaceValid = false;
 let surfaceAngle = 0;
 let anchorsEnabled = false;
 
+let startCameraPosition = null;
+let currentCameraPosition = null;
+let hitViewerPosition = null;
+let hitLocalPosition = null;
+let hitMatrixValues = null;
+let hitNormalValues = null;
+
 const placed = [];
 const anchors = [];
 
@@ -88,14 +95,6 @@ function init() {
         clearProducts
     );
 
-    /*
-        IMPORTANT:
-        beforexrselect must only block XR selection
-        when the user touches an actual UI button.
-
-        It must NOT be attached to the whole overlay.
-    */
-
     clearButton.addEventListener(
         "beforexrselect",
         function (event) {
@@ -114,6 +113,9 @@ function init() {
         "resize",
         onResize
     );
+
+    status.style.fontSize = "11px";
+    status.style.lineHeight = "1.25";
 
     updateStatus();
     checkARSupport();
@@ -266,14 +268,6 @@ async function onSessionStarted(session) {
         onSessionEnd
     );
 
-    /*
-        On Android WebXR a screen tap
-        generates the select event.
-
-        We ONLY set the request here.
-        Placement happens in render().
-    */
-
     session.addEventListener(
         "select",
         onSelect
@@ -329,6 +323,30 @@ function render(time, frame) {
     if (frame && xrSession) {
         updateAnchors(frame);
 
+        // E1: camera position in local reference space
+        if (localSpace) {
+            const viewerPoseLocal =
+                frame.getViewerPose(
+                    localSpace
+                );
+
+            if (viewerPoseLocal) {
+                const p =
+                    viewerPoseLocal.transform.position;
+
+                currentCameraPosition = [
+                    p.x,
+                    p.y,
+                    p.z
+                ];
+
+                if (!startCameraPosition) {
+                    startCameraPosition =
+                        currentCameraPosition.slice();
+                }
+            }
+        }
+
         if (
             hitTestSource &&
             localSpace
@@ -344,32 +362,61 @@ function render(time, frame) {
                 const hit =
                     hitTestResults[0];
 
+                // Same hit in LOCAL space
                 const pose =
                     hit.getPose(
                         localSpace
                     );
 
+                // Same hit in VIEWER space
+                const viewerHitPose =
+                    viewerSpace
+                        ? hit.getPose(
+                            viewerSpace
+                        )
+                        : null;
+
+                if (viewerHitPose) {
+                    const vp =
+                        viewerHitPose.transform.position;
+
+                    hitViewerPosition = [
+                        vp.x,
+                        vp.y,
+                        vp.z
+                    ];
+                }
+
                 if (pose) {
+                    const lp =
+                        pose.transform.position;
+
+                    hitLocalPosition = [
+                        lp.x,
+                        lp.y,
+                        lp.z
+                    ];
+
+                    hitMatrixValues =
+                        Array.from(
+                            pose.transform.matrix
+                        );
+
                     updateReticle(
                         pose
                     );
 
-                    /*
-                        Placement happens here,
-                        on the frame after select.
-                    */
+                    if (placeRequested) {
+                        if (surfaceValid) {
+                            placeTable(
+                                hit,
+                                pose
+                            );
+                        }
 
-                    if (
-                        placeRequested &&
-                        surfaceValid
-                    ) {
-                        placeTable(
-                            hit,
-                            pose
-                        );
-
-                        placeRequested =
-                            false;
+                        // Consume every tap.
+                        // Invalid surface = do nothing.
+                        placeRequested = false;
                     }
 
                 } else {
@@ -412,6 +459,12 @@ function updateReticle(pose) {
             matrix[6]
         ).normalize();
 
+    hitNormalValues = [
+        normal.x,
+        normal.y,
+        normal.z
+    ];
+
     const worldUp =
         new THREE.Vector3(
             0,
@@ -441,14 +494,6 @@ function trackingLost() {
 
     surfaceValid = false;
     surfaceAngle = 0;
-
-    /*
-        Do NOT clear placeRequested here.
-
-        A slow phone can temporarily lose
-        a hit for one frame immediately
-        after the user taps.
-    */
 }
 
 function placeTable(hit, pose) {
@@ -456,7 +501,7 @@ function placeTable(hit, pose) {
         createCoffeeTable();
 
     /*
-        Variant rule:
+        Variant:
         keep hit pose orientation.
     */
 
@@ -480,9 +525,8 @@ function placeTable(hit, pose) {
     );
 
     /*
-        Multi-placement variant:
-        maximum 5 products.
-        The 6th removes the oldest.
+        Maximum 5 products.
+        6th removes oldest.
     */
 
     if (
@@ -503,8 +547,8 @@ function createCoffeeTable() {
         new THREE.Group();
 
     /*
-        Group origin is at the centre
-        of the base on the floor.
+        Group origin:
+        centre of base on floor.
     */
 
     const material =
@@ -612,11 +656,6 @@ async function createAnchor(
         const anchor =
             await hit.createAnchor();
 
-        /*
-            The table may have been removed
-            while the anchor was being created.
-    */
-
         if (
             !placed.includes(
                 table
@@ -721,6 +760,32 @@ function clearProducts() {
     updateStatus();
 }
 
+function formatVec(values) {
+    if (!values) {
+        return "-";
+    }
+
+    return values
+        .map(
+            value =>
+                value.toFixed(3)
+        )
+        .join(", ");
+}
+
+function formatMatrix(values) {
+    if (!values) {
+        return "-";
+    }
+
+    return values
+        .map(
+            value =>
+                value.toFixed(3)
+        )
+        .join(", ");
+}
+
 function updateStatus() {
     let reticleState =
         "none";
@@ -748,18 +813,15 @@ function updateStatus() {
             : "-";
 
     status.innerHTML =
-        "ID: 241482<br>" +
-        "Variant: Coffee Table<br>" +
+        "ID: 241482 | Coffee Table<br>" +
 
         "Session: " +
         sessionState +
-        "<br>" +
 
-        "Reticle: " +
+        " | Reticle: " +
         reticleState +
-        "<br>" +
 
-        "Angle: " +
+        " | Angle: " +
         angleText +
         "<br>" +
 
@@ -769,12 +831,61 @@ function updateStatus() {
                 ? "ON"
                 : "OFF"
         ) +
-        "<br>" +
 
-        "Products: " +
+        " | Products: " +
         placed.length +
         " / " +
-        MAX_TABLES;
+        MAX_TABLES +
+
+        "<br><br>" +
+
+        "<b>E1 CAMERA (LOCAL)</b><br>" +
+
+        "Start: [" +
+        formatVec(
+            startCameraPosition
+        ) +
+        "]<br>" +
+
+        "Current: [" +
+        formatVec(
+            currentCameraPosition
+        ) +
+        "]<br><br>" +
+
+        "<b>E1 SAME HIT</b><br>" +
+
+        "Viewer: [" +
+        formatVec(
+            hitViewerPosition
+        ) +
+        "]<br>" +
+
+        "Local: [" +
+        formatVec(
+            hitLocalPosition
+        ) +
+        "]<br><br>" +
+
+        "<b>E3 HIT POSE</b><br>" +
+
+        "Position: [" +
+        formatVec(
+            hitLocalPosition
+        ) +
+        "]<br>" +
+
+        "Normal [4,5,6]: [" +
+        formatVec(
+            hitNormalValues
+        ) +
+        "]<br>" +
+
+        "Matrix 16:<br>[" +
+        formatMatrix(
+            hitMatrixValues
+        ) +
+        "]";
 }
 
 function onSessionEnd() {
@@ -813,6 +924,13 @@ function onSessionEnd() {
     surfaceAngle = 0;
 
     anchorsEnabled = false;
+
+    startCameraPosition = null;
+    currentCameraPosition = null;
+    hitViewerPosition = null;
+    hitLocalPosition = null;
+    hitMatrixValues = null;
+    hitNormalValues = null;
 
     reticle.visible = false;
 
