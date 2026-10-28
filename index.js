@@ -1,61 +1,114 @@
-import * as THREE from "three";
+import * as THREE from "https://unpkg.com/three@0.186.1/build/three.module.js";
 
-let gl;
-let glCanvas;
-let camera;
 let scene;
+let camera;
 let renderer;
-let reticle;
 
 let xrSession = null;
-let hitTestSource = null;
-let viewerSpace = null;
 let localSpace = null;
+let viewerSpace = null;
+let hitTestSource = null;
+
+let reticle;
+let reticleMaterial;
+
+let surfaceValid = false;
+let currentTiltAngle = null;
+let currentHit = null;
 
 let placeRequested = false;
-let surfaceValid = false;
-let surfaceAngle = 0;
 let anchorsEnabled = false;
 
-let startCameraPosition = null;
-let currentCameraPosition = null;
-let hitViewerPosition = null;
-let hitLocalPosition = null;
-let hitMatrixValues = null;
-let hitNormalValues = null;
+const placedProducts = [];
+const MAX_PRODUCTS = 5;
+const SURFACE_TOLERANCE = 12;
 
-const placed = [];
-const anchors = [];
-
+// Coffee table dimensions in metres
 const TABLE_WIDTH = 1.0;
 const TABLE_DEPTH = 0.5;
 const TABLE_HEIGHT = 0.45;
+const TOP_THICKNESS = 0.06;
+const LEG_SIZE = 0.07;
 
-const MAX_TABLES = 5;
+// E1 / E3 evidence values
+let startCameraPosition = null;
+let currentCameraPosition = null;
 
-const status = document.getElementById("status");
-const clearButton = document.getElementById("clear");
-const arButton = document.getElementById("arButton");
-const fallback = document.getElementById("fallback");
+let hitViewerPosition = null;
+let hitLocalPosition = null;
+
+let hitMatrixValues = [];
+let hitNormalValues = [];
+
+// ----------------------------------------------------
+// DOM
+// ----------------------------------------------------
+
+const startButton = document.getElementById("start-ar");
+const stopButton = document.getElementById("stop-ar");
+const clearButton = document.getElementById("clear-products");
+
+const overlay = document.getElementById("overlay");
+
+const sessionStatus = document.getElementById("session-status");
+const reticleStatus = document.getElementById("reticle-status");
+const angleStatus = document.getElementById("angle-status");
+const anchorStatus = document.getElementById("anchor-status");
+const productStatus = document.getElementById("product-status");
+
+// ----------------------------------------------------
+// EXTRA EVIDENCE PANEL
+// ----------------------------------------------------
+
+const evidencePanel = document.createElement("div");
+
+evidencePanel.style.marginTop = "8px";
+evidencePanel.style.padding = "7px";
+evidencePanel.style.background = "rgba(0, 0, 0, 0.55)";
+evidencePanel.style.borderRadius = "8px";
+evidencePanel.style.fontSize = "10px";
+evidencePanel.style.lineHeight = "1.25";
+evidencePanel.style.wordBreak = "break-word";
+evidencePanel.style.maxWidth = "95vw";
+
+evidencePanel.innerHTML = `
+    <div style="font-weight:bold;">E1 CAMERA (LOCAL)</div>
+    <div id="camera-start">Start: waiting...</div>
+    <div id="camera-current">Current: waiting...</div>
+
+    <div style="font-weight:bold; margin-top:5px;">
+        E1 SAME HIT
+    </div>
+    <div id="hit-viewer">Viewer: waiting...</div>
+    <div id="hit-local">Local: waiting...</div>
+
+    <div style="font-weight:bold; margin-top:5px;">
+        E3 HIT POSE
+    </div>
+    <div id="hit-position">Position: waiting...</div>
+    <div id="hit-normal">Normal [4,5,6]: waiting...</div>
+    <div id="hit-matrix">Matrix 16: waiting...</div>
+`;
+
+overlay.appendChild(evidencePanel);
+
+const cameraStartText = document.getElementById("camera-start");
+const cameraCurrentText = document.getElementById("camera-current");
+
+const hitViewerText = document.getElementById("hit-viewer");
+const hitLocalText = document.getElementById("hit-local");
+
+const hitPositionText = document.getElementById("hit-position");
+const hitNormalText = document.getElementById("hit-normal");
+const hitMatrixText = document.getElementById("hit-matrix");
+
+// ----------------------------------------------------
+// INITIALIZATION
+// ----------------------------------------------------
 
 init();
 
 function init() {
-    glCanvas = document.createElement("canvas");
-
-    gl = glCanvas.getContext("webgl2", {
-        xrCompatible: true,
-        alpha: true
-    });
-
-    if (!gl) {
-        fallback.hidden = false;
-        fallback.textContent = "WebGL2 is not available.";
-        return;
-    }
-
-    document.body.appendChild(glCanvas);
-
     scene = new THREE.Scene();
 
     camera = new THREE.PerspectiveCamera(
@@ -66,108 +119,80 @@ function init() {
     );
 
     renderer = new THREE.WebGLRenderer({
-        canvas: glCanvas,
-        context: gl,
+        antialias: true,
         alpha: true
     });
 
-    renderer.setPixelRatio(
-        Math.min(window.devicePixelRatio, 2)
-    );
-
-    renderer.setSize(
-        window.innerWidth,
-        window.innerHeight
-    );
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.xr.enabled = true;
 
-    createLights();
+    document.body.appendChild(renderer.domElement);
+
+    addLights();
     createReticle();
 
-    arButton.addEventListener(
-        "click",
-        onARButton
-    );
+    renderer.setAnimationLoop(render);
 
-    clearButton.addEventListener(
-        "click",
-        clearProducts
-    );
+    window.addEventListener("resize", onWindowResize);
 
-    clearButton.addEventListener(
-        "beforexrselect",
-        function (event) {
-            event.preventDefault();
-        }
-    );
+    startButton.addEventListener("click", startAR);
+    stopButton.addEventListener("click", stopAR);
+    clearButton.addEventListener("click", clearProducts);
 
-    arButton.addEventListener(
-        "beforexrselect",
-        function (event) {
-            event.preventDefault();
-        }
-    );
+    preventOverlayPlacement(startButton);
+    preventOverlayPlacement(stopButton);
+    preventOverlayPlacement(clearButton);
 
-    window.addEventListener(
-        "resize",
-        onResize
-    );
-
-    status.style.fontSize = "11px";
-    status.style.lineHeight = "1.25";
-
-    updateStatus();
-    checkARSupport();
+    updateOverlay();
 }
 
-function createLights() {
-    const hemiLight =
-        new THREE.HemisphereLight(
-            0xffffff,
-            0x444444,
-            2
-        );
+// ----------------------------------------------------
+// LIGHTS
+// ----------------------------------------------------
 
-    scene.add(hemiLight);
-
-    const directionalLight =
-        new THREE.DirectionalLight(
-            0xffffff,
-            2
-        );
-
-    directionalLight.position.set(
-        1,
-        2,
-        1
+function addLights() {
+    const hemisphereLight = new THREE.HemisphereLight(
+        0xffffff,
+        0x444444,
+        2.2
     );
+
+    scene.add(hemisphereLight);
+
+    const directionalLight = new THREE.DirectionalLight(
+        0xffffff,
+        2.0
+    );
+
+    directionalLight.position.set(1, 2, 1);
 
     scene.add(directionalLight);
 }
 
-function createReticle() {
-    const geometry =
-        new THREE.RingGeometry(
-            0.06,
-            0.08,
-            32
-        );
+// ----------------------------------------------------
+// RETICLE
+// ----------------------------------------------------
 
-    geometry.rotateX(
-        -Math.PI / 2
+function createReticle() {
+    const geometry = new THREE.RingGeometry(
+        0.07,
+        0.09,
+        32
     );
 
-    const material =
-        new THREE.MeshBasicMaterial({
-            color: 0x00ff00
-        });
+    geometry.rotateX(-Math.PI / 2);
 
-    reticle =
-        new THREE.Mesh(
-            geometry,
-            material
-        );
+    reticleMaterial = new THREE.MeshBasicMaterial({
+        color: 0x00ff00,
+        side: THREE.DoubleSide
+    });
+
+    reticle = new THREE.Mesh(
+        geometry,
+        reticleMaterial
+    );
 
     reticle.matrixAutoUpdate = false;
     reticle.visible = false;
@@ -175,237 +200,226 @@ function createReticle() {
     scene.add(reticle);
 }
 
-async function checkARSupport() {
+// ----------------------------------------------------
+// START AR
+// ----------------------------------------------------
+
+async function startAR() {
+    if (xrSession) {
+        return;
+    }
+
     if (!navigator.xr) {
-        arButton.disabled = true;
-
-        fallback.hidden = false;
-        fallback.textContent =
-            "WebXR is not supported on this device.";
-
+        sessionStatus.textContent = "Session: WebXR unavailable";
         return;
     }
 
     try {
-        const supported =
-            await navigator.xr.isSessionSupported(
-                "immersive-ar"
-            );
+        const supported = await navigator.xr.isSessionSupported(
+            "immersive-ar"
+        );
 
         if (!supported) {
-            arButton.disabled = true;
-
-            fallback.hidden = false;
-            fallback.textContent =
-                "Immersive AR is not supported on this device.";
+            sessionStatus.textContent =
+                "Session: immersive-ar unsupported";
+            return;
         }
 
-    } catch (error) {
-        arButton.disabled = true;
+        /*
+         * ANCHORS OFF TEST
+         *
+         * We intentionally DO NOT request "anchors".
+         * This allows us to test the fallback placement.
+         */
+        xrSession = await navigator.xr.requestSession(
+            "immersive-ar",
+            {
+                requiredFeatures: [
+                    "hit-test"
+                ],
 
-        fallback.hidden = false;
-        fallback.textContent =
-            "AR support check failed: " +
-            error.message;
-    }
-}
+                optionalFeatures: [
+                    "dom-overlay"
+                ],
 
-async function onARButton() {
-    if (xrSession) {
-        await xrSession.end();
-        return;
-    }
-
-    try {
-        status.innerHTML =
-            "Starting AR...";
-
-        const session =
-            await navigator.xr.requestSession(
-                "immersive-ar",
-                {
-                    requiredFeatures: [
-                        "hit-test"
-                    ],
-
-                    optionalFeatures: [
-                        "anchors",
-                        "dom-overlay"
-                    ],
-
-                    domOverlay: {
-                        root:
-                            document.getElementById(
-                                "overlay"
-                            )
-                    }
+                domOverlay: {
+                    root: overlay
                 }
-            );
-
-        await onSessionStarted(
-            session
+            }
         );
 
-    } catch (error) {
-        console.error(
-            "AR start error:",
-            error
+        sessionStatus.textContent = "Session: starting...";
+
+        xrSession.addEventListener(
+            "end",
+            onSessionEnded
         );
 
-        status.innerHTML =
-            "AR ERROR:<br>" +
-            error.name +
-            "<br>" +
-            error.message;
-    }
-}
-
-async function onSessionStarted(session) {
-    xrSession = session;
-
-    session.addEventListener(
-        "end",
-        onSessionEnd
-    );
-
-    session.addEventListener(
-        "select",
-        onSelect
-    );
-
-    renderer.xr.setReferenceSpaceType(
-        "local"
-    );
-
-    await renderer.xr.setSession(
-        session
-    );
-
-    viewerSpace =
-        await session.requestReferenceSpace(
-            "viewer"
+        xrSession.addEventListener(
+            "select",
+            onSelect
         );
 
-    localSpace =
-        await session.requestReferenceSpace(
+        await renderer.xr.setSession(xrSession);
+
+        localSpace = await xrSession.requestReferenceSpace(
             "local"
         );
 
-    if (session.enabledFeatures) {
-        anchorsEnabled =
-            Array.from(
-                session.enabledFeatures
-            ).includes("anchors");
-    } else {
+        viewerSpace = await xrSession.requestReferenceSpace(
+            "viewer"
+        );
+
+        hitTestSource =
+            await xrSession.requestHitTestSource({
+                space: viewerSpace
+            });
+
+        /*
+         * FORCE ANCHORS OFF FOR THIS EXPERIMENT.
+         * Since "anchors" was not requested, fallback
+         * placement will be used.
+         */
         anchorsEnabled = false;
+
+        startCameraPosition = null;
+        currentCameraPosition = null;
+
+        hitViewerPosition = null;
+        hitLocalPosition = null;
+
+        hitMatrixValues = [];
+        hitNormalValues = [];
+
+        startButton.disabled = true;
+        stopButton.disabled = false;
+
+        sessionStatus.textContent = "Session: running";
+
+        updateOverlay();
+    } catch (error) {
+        console.error("Failed to start AR session:", error);
+
+        sessionStatus.textContent =
+            "Session: failed to start";
+
+        xrSession = null;
+
+        startButton.disabled = false;
+        stopButton.disabled = true;
     }
-
-    hitTestSource =
-        await session.requestHitTestSource({
-            space: viewerSpace
-        });
-
-    arButton.textContent =
-        "STOP AR";
-
-    renderer.setAnimationLoop(
-        render
-    );
-
-    updateStatus();
 }
 
+// ----------------------------------------------------
+// STOP AR
+// ----------------------------------------------------
+
+async function stopAR() {
+    if (!xrSession) {
+        return;
+    }
+
+    try {
+        await xrSession.end();
+    } catch (error) {
+        console.error("Failed to stop AR session:", error);
+    }
+}
+
+// ----------------------------------------------------
+// SESSION END
+// ----------------------------------------------------
+
+function onSessionEnded() {
+    if (hitTestSource) {
+        hitTestSource.cancel();
+        hitTestSource = null;
+    }
+
+    clearProducts();
+
+    xrSession = null;
+    localSpace = null;
+    viewerSpace = null;
+
+    currentHit = null;
+
+    surfaceValid = false;
+    currentTiltAngle = null;
+    placeRequested = false;
+
+    anchorsEnabled = false;
+
+    startCameraPosition = null;
+    currentCameraPosition = null;
+
+    hitViewerPosition = null;
+    hitLocalPosition = null;
+
+    hitMatrixValues = [];
+    hitNormalValues = [];
+
+    reticle.visible = false;
+
+    startButton.disabled = false;
+    stopButton.disabled = true;
+
+    sessionStatus.textContent = "Session: stopped";
+
+    updateOverlay();
+}
+
+// ----------------------------------------------------
+// SELECT / TAP
+// ----------------------------------------------------
+
 function onSelect() {
+    /*
+     * Important:
+     * select only requests placement.
+     * Actual placement happens in the next XR frame
+     * using the current hit result.
+     */
     placeRequested = true;
 }
 
-function render(time, frame) {
-    if (frame && xrSession) {
-        updateAnchors(frame);
+// ----------------------------------------------------
+// RENDER LOOP
+// ----------------------------------------------------
 
-        // E1: camera position in local reference space
-        if (localSpace) {
-            const viewerPoseLocal =
-                frame.getViewerPose(
-                    localSpace
-                );
+function render(timestamp, frame) {
+    if (
+        frame &&
+        xrSession &&
+        localSpace
+    ) {
+        updateCameraEvidence(frame);
 
-            if (viewerPoseLocal) {
-                const p =
-                    viewerPoseLocal.transform.position;
+        if (hitTestSource) {
+            const hitResults =
+                frame.getHitTestResults(hitTestSource);
 
-                currentCameraPosition = [
-                    p.x,
-                    p.y,
-                    p.z
-                ];
+            if (hitResults.length > 0) {
+                const hit = hitResults[0];
 
-                if (!startCameraPosition) {
-                    startCameraPosition =
-                        currentCameraPosition.slice();
-                }
-            }
-        }
-
-        if (
-            hitTestSource &&
-            localSpace
-        ) {
-            const hitTestResults =
-                frame.getHitTestResults(
-                    hitTestSource
-                );
-
-            if (
-                hitTestResults.length > 0
-            ) {
-                const hit =
-                    hitTestResults[0];
-
-                // Same hit in LOCAL space
                 const pose =
-                    hit.getPose(
-                        localSpace
-                    );
-
-                // Same hit in VIEWER space
-                const viewerHitPose =
-                    viewerSpace
-                        ? hit.getPose(
-                            viewerSpace
-                        )
-                        : null;
-
-                if (viewerHitPose) {
-                    const vp =
-                        viewerHitPose.transform.position;
-
-                    hitViewerPosition = [
-                        vp.x,
-                        vp.y,
-                        vp.z
-                    ];
-                }
+                    hit.getPose(localSpace);
 
                 if (pose) {
-                    const lp =
-                        pose.transform.position;
-
-                    hitLocalPosition = [
-                        lp.x,
-                        lp.y,
-                        lp.z
-                    ];
-
-                    hitMatrixValues =
-                        Array.from(
-                            pose.transform.matrix
-                        );
+                    currentHit = hit;
 
                     updateReticle(
+                        hit,
                         pose
                     );
 
+                    updateHitEvidence(hit, pose);
+
+                    /*
+                     * Consume the tap in this frame.
+                     * Placement only happens when
+                     * the current surface is valid.
+                     */
                     if (placeRequested) {
                         if (surfaceValid) {
                             placeTable(
@@ -414,22 +428,16 @@ function render(time, frame) {
                             );
                         }
 
-                        // Consume every tap.
-                        // Invalid surface = do nothing.
                         placeRequested = false;
                     }
-
                 } else {
-                    trackingLost();
+                    noHit();
                 }
-
             } else {
-                trackingLost();
+                noHit();
             }
         }
     }
-
-    updateStatus();
 
     renderer.render(
         scene,
@@ -437,33 +445,153 @@ function render(time, frame) {
     );
 }
 
-function updateReticle(pose) {
-    reticle.visible = true;
+// ----------------------------------------------------
+// CAMERA EVIDENCE — E1
+// ----------------------------------------------------
 
-    reticle.matrix.fromArray(
-        pose.transform.matrix
-    );
+function updateCameraEvidence(frame) {
+    if (!localSpace) {
+        return;
+    }
 
+    const viewerPose =
+        frame.getViewerPose(localSpace);
+
+    if (!viewerPose) {
+        return;
+    }
+
+    const position =
+        viewerPose.transform.position;
+
+    currentCameraPosition = [
+        position.x,
+        position.y,
+        position.z
+    ];
+
+    if (!startCameraPosition) {
+        startCameraPosition = [
+            position.x,
+            position.y,
+            position.z
+        ];
+    }
+
+    cameraStartText.textContent =
+        "Start: " +
+        formatVector(startCameraPosition);
+
+    cameraCurrentText.textContent =
+        "Current: " +
+        formatVector(currentCameraPosition);
+}
+
+// ----------------------------------------------------
+// HIT EVIDENCE — E1 + E3
+// ----------------------------------------------------
+
+function updateHitEvidence(hit, localPose) {
+    if (!localPose) {
+        return;
+    }
+
+    const localPosition =
+        localPose.transform.position;
+
+    hitLocalPosition = [
+        localPosition.x,
+        localPosition.y,
+        localPosition.z
+    ];
+
+    /*
+     * Same hit result, but pose expressed
+     * relative to viewerSpace.
+     */
+    if (viewerSpace) {
+        const viewerPose =
+            hit.getPose(viewerSpace);
+
+        if (viewerPose) {
+            const viewerPosition =
+                viewerPose.transform.position;
+
+            hitViewerPosition = [
+                viewerPosition.x,
+                viewerPosition.y,
+                viewerPosition.z
+            ];
+        }
+    }
+
+    const matrix =
+        localPose.transform.matrix;
+
+    hitMatrixValues =
+        Array.from(matrix);
+
+    /*
+     * Y-axis column of the hit pose matrix.
+     * Indices 4, 5, 6.
+     */
+    hitNormalValues = [
+        matrix[4],
+        matrix[5],
+        matrix[6]
+    ];
+
+    hitViewerText.textContent =
+        "Viewer: " +
+        (
+            hitViewerPosition
+                ? formatVector(hitViewerPosition)
+                : "waiting..."
+        );
+
+    hitLocalText.textContent =
+        "Local: " +
+        formatVector(hitLocalPosition);
+
+    hitPositionText.textContent =
+        "Position: " +
+        formatVector(hitLocalPosition);
+
+    hitNormalText.textContent =
+        "Normal [4,5,6]: " +
+        formatVector(hitNormalValues);
+
+    hitMatrixText.textContent =
+        "Matrix 16: " +
+        hitMatrixValues
+            .map(value => value.toFixed(3))
+            .join(", ");
+}
+
+// ----------------------------------------------------
+// UPDATE RETICLE
+// ----------------------------------------------------
+
+function updateReticle(hit, pose) {
     const matrix =
         pose.transform.matrix;
 
+    reticle.matrix.fromArray(matrix);
+    reticle.visible = true;
+
     /*
-        Y-axis column of the hit pose matrix
-        gives the surface normal.
-    */
+     * Surface normal:
+     * Y-axis column of pose matrix.
+     *
+     * matrix[4], matrix[5], matrix[6]
+     */
+    const normal = new THREE.Vector3(
+        matrix[4],
+        matrix[5],
+        matrix[6]
+    );
 
-    const normal =
-        new THREE.Vector3(
-            matrix[4],
-            matrix[5],
-            matrix[6]
-        ).normalize();
-
-    hitNormalValues = [
-        normal.x,
-        normal.y,
-        normal.z
-    ];
+    normal.normalize();
 
     const worldUp =
         new THREE.Vector3(
@@ -472,39 +600,81 @@ function updateReticle(pose) {
             0
         );
 
-    surfaceAngle =
+    const dot = THREE.MathUtils.clamp(
+        normal.dot(worldUp),
+        -1,
+        1
+    );
+
+    const angleRadians =
+        Math.acos(dot);
+
+    const angleDegrees =
         THREE.MathUtils.radToDeg(
-            normal.angleTo(
-                worldUp
-            )
+            angleRadians
         );
 
-    surfaceValid =
-        surfaceAngle <= 12;
+    currentTiltAngle = angleDegrees;
 
-    reticle.material.color.set(
-        surfaceValid
-            ? 0x00ff00
-            : 0xff0000
-    );
+    surfaceValid =
+        angleDegrees <= SURFACE_TOLERANCE;
+
+    if (surfaceValid) {
+        reticleMaterial.color.set(
+            0x00ff00
+        );
+    } else {
+        reticleMaterial.color.set(
+            0xff0000
+        );
+    }
+
+    updateOverlay();
 }
 
-function trackingLost() {
-    reticle.visible = false;
+// ----------------------------------------------------
+// NO HIT
+// ----------------------------------------------------
+
+function noHit() {
+    currentHit = null;
 
     surfaceValid = false;
-    surfaceAngle = 0;
+    currentTiltAngle = null;
+
+    reticle.visible = false;
+
+    /*
+     * If the user tapped but tracking/hit
+     * was lost, consume the request so
+     * a later hit does not unexpectedly
+     * place an object.
+     */
+    if (placeRequested) {
+        placeRequested = false;
+    }
+
+    updateOverlay();
 }
 
-function placeTable(hit, pose) {
+// ----------------------------------------------------
+// PLACE TABLE
+// ----------------------------------------------------
+
+async function placeTable(hit, pose) {
+    if (
+        !surfaceValid ||
+        !pose
+    ) {
+        return;
+    }
+
     const table =
         createCoffeeTable();
 
     /*
-        Variant:
-        keep hit pose orientation.
-    */
-
+     * Keep the hit pose orientation.
+     */
     table.matrix.fromArray(
         pose.transform.matrix
     );
@@ -515,107 +685,160 @@ function placeTable(hit, pose) {
         table.scale
     );
 
+    table.matrixAutoUpdate = true;
+
     scene.add(table);
 
-    placed.push(table);
+    const productRecord = {
+        group: table,
+        anchor: null,
+        anchorSpace: null
+    };
 
-    createAnchor(
-        hit,
-        table
+    /*
+     * Anchors are intentionally OFF in
+     * this experiment, so this block will
+     * not execute.
+     */
+    if (
+        anchorsEnabled &&
+        hit &&
+        typeof hit.createAnchor === "function"
+    ) {
+        try {
+            const anchor =
+                await hit.createAnchor();
+
+            if (anchor) {
+                productRecord.anchor =
+                    anchor;
+
+                productRecord.anchorSpace =
+                    anchor.anchorSpace;
+            }
+        } catch (error) {
+            console.warn(
+                "Anchor creation failed. Using fallback placement.",
+                error
+            );
+        }
+    }
+
+    placedProducts.push(
+        productRecord
     );
 
     /*
-        Maximum 5 products.
-        6th removes oldest.
-    */
-
+     * Maximum 5 products.
+     * The 6th placement removes the oldest.
+     */
     if (
-        placed.length >
-        MAX_TABLES
+        placedProducts.length >
+        MAX_PRODUCTS
     ) {
-        const oldest =
-            placed.shift();
-
-        removeTable(
-            oldest
-        );
+        removeOldestProduct();
     }
+
+    updateOverlay();
 }
 
+// ----------------------------------------------------
+// CREATE COFFEE TABLE
+// ----------------------------------------------------
+
 function createCoffeeTable() {
-    const table =
+    const group =
         new THREE.Group();
 
     /*
-        Group origin:
-        centre of base on floor.
-    */
+     * Origin is at the centre of the base
+     * on the floor.
+     */
 
-    const material =
+    const woodMaterial =
         new THREE.MeshStandardMaterial({
             color: 0x8b5a2b,
             roughness: 0.65,
-            metalness: 0
+            metalness: 0.05
         });
 
-    const topThickness =
-        0.05;
+    const darkWoodMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x5c3a21,
+            roughness: 0.7,
+            metalness: 0.05
+        });
 
-    const legSize =
-        0.06;
+    // -----------------------------
+    // TABLE TOP
+    // -----------------------------
 
-    const legHeight =
-        TABLE_HEIGHT -
-        topThickness;
-
-    /*
-        Table top:
-        1.00 m x 0.50 m
-    */
+    const topGeometry =
+        new THREE.BoxGeometry(
+            TABLE_WIDTH,
+            TOP_THICKNESS,
+            TABLE_DEPTH
+        );
 
     const top =
         new THREE.Mesh(
-            new THREE.BoxGeometry(
-                TABLE_WIDTH,
-                topThickness,
-                TABLE_DEPTH
-            ),
-            material
+            topGeometry,
+            woodMaterial
         );
 
     top.position.y =
         TABLE_HEIGHT -
-        topThickness / 2;
+        TOP_THICKNESS / 2;
 
-    table.add(top);
+    group.add(top);
 
-    /*
-        Four legs.
-    */
+    // -----------------------------
+    // LEGS
+    // -----------------------------
+
+    const legHeight =
+        TABLE_HEIGHT -
+        TOP_THICKNESS;
 
     const legGeometry =
         new THREE.BoxGeometry(
-            legSize,
+            LEG_SIZE,
             legHeight,
-            legSize
+            LEG_SIZE
         );
 
     const legY =
         legHeight / 2;
 
-    const x =
+    const xOffset =
         TABLE_WIDTH / 2 -
-        legSize;
+        LEG_SIZE;
 
-    const z =
+    const zOffset =
         TABLE_DEPTH / 2 -
-        legSize;
+        LEG_SIZE;
 
     const legPositions = [
-        [-x, legY, -z],
-        [ x, legY, -z],
-        [-x, legY,  z],
-        [ x, legY,  z]
+        [
+            -xOffset,
+            legY,
+            -zOffset
+        ],
+        [
+            xOffset,
+            legY,
+            -zOffset
+        ],
+        [
+            -xOffset,
+            legY,
+            zOffset
+        ],
+        [
+            xOffset,
+            legY,
+            zOffset
+        ]
     ];
 
     for (
@@ -625,7 +848,7 @@ function createCoffeeTable() {
         const leg =
             new THREE.Mesh(
                 legGeometry,
-                material
+                darkWoodMaterial
             );
 
         leg.position.set(
@@ -634,313 +857,295 @@ function createCoffeeTable() {
             position[2]
         );
 
-        table.add(leg);
+        group.add(leg);
     }
 
-    return table;
-}
+    // -----------------------------
+    // LOWER SUPPORT
+    // -----------------------------
 
-async function createAnchor(
-    hit,
-    table
-) {
-    if (
-        !anchorsEnabled ||
-        typeof hit.createAnchor !==
-            "function"
-    ) {
-        return;
-    }
-
-    try {
-        const anchor =
-            await hit.createAnchor();
-
-        if (
-            !placed.includes(
-                table
-            )
-        ) {
-            try {
-                anchor.delete();
-            } catch (error) {
-                console.log(
-                    "Anchor already removed."
-                );
-            }
-
-            return;
-        }
-
-        anchors.push({
-            anchor: anchor,
-            table: table
-        });
-
-    } catch (error) {
-        console.log(
-            "Anchor creation unavailable. Using pose fallback."
+    const supportGeometry =
+        new THREE.BoxGeometry(
+            TABLE_WIDTH * 0.70,
+            0.035,
+            0.05
         );
-    }
+
+    const support =
+        new THREE.Mesh(
+            supportGeometry,
+            darkWoodMaterial
+        );
+
+    support.position.y =
+        legHeight * 0.42;
+
+    group.add(support);
+
+    /*
+     * Verify approximate model dimensions.
+     */
+    group.updateMatrixWorld(true);
+
+    const box =
+        new THREE.Box3().setFromObject(group);
+
+    const size =
+        new THREE.Vector3();
+
+    box.getSize(size);
+
+    console.log(
+        "Coffee table size (m):",
+        {
+            width: size.x.toFixed(3),
+            height: size.y.toFixed(3),
+            depth: size.z.toFixed(3)
+        }
+    );
+
+    return group;
 }
 
-function updateAnchors(frame) {
-    if (!localSpace) {
+// ----------------------------------------------------
+// UPDATE ANCHORED OBJECTS
+// ----------------------------------------------------
+
+function updateAnchoredProducts(frame) {
+    if (
+        !frame ||
+        !localSpace
+    ) {
         return;
     }
 
     for (
-        const item
-        of anchors
+        const product
+        of placedProducts
     ) {
-        const pose =
+        if (
+            !product.anchor ||
+            !product.anchorSpace
+        ) {
+            continue;
+        }
+
+        const anchorPose =
             frame.getPose(
-                item.anchor.anchorSpace,
+                product.anchorSpace,
                 localSpace
             );
 
-        if (pose) {
-            item.table.matrix.fromArray(
-                pose.transform.matrix
-            );
-
-            item.table.matrix.decompose(
-                item.table.position,
-                item.table.quaternion,
-                item.table.scale
-            );
+        if (!anchorPose) {
+            continue;
         }
+
+        product.group.matrix.fromArray(
+            anchorPose.transform.matrix
+        );
+
+        product.group.matrix.decompose(
+            product.group.position,
+            product.group.quaternion,
+            product.group.scale
+        );
     }
 }
 
-function removeTable(table) {
-    scene.remove(table);
+// ----------------------------------------------------
+// REMOVE OLDEST
+// ----------------------------------------------------
 
-    const anchorIndex =
-        anchors.findIndex(
-            item =>
-                item.table === table
-        );
-
+function removeOldestProduct() {
     if (
-        anchorIndex !== -1
+        placedProducts.length === 0
     ) {
-        try {
-            anchors[
-                anchorIndex
-            ].anchor.delete();
-
-        } catch (error) {
-            console.log(
-                "Anchor already removed."
-            );
-        }
-
-        anchors.splice(
-            anchorIndex,
-            1
-        );
+        return;
     }
+
+    const oldest =
+        placedProducts.shift();
+
+    removeProductRecord(oldest);
 }
+
+// ----------------------------------------------------
+// CLEAR PRODUCTS
+// ----------------------------------------------------
 
 function clearProducts() {
-    placeRequested = false;
-
     while (
-        placed.length > 0
+        placedProducts.length > 0
     ) {
-        const table =
-            placed.pop();
+        const product =
+            placedProducts.pop();
 
-        removeTable(
-            table
+        removeProductRecord(product);
+    }
+
+    updateOverlay();
+}
+
+// ----------------------------------------------------
+// REMOVE PRODUCT RECORD
+// ----------------------------------------------------
+
+function removeProductRecord(product) {
+    if (!product) {
+        return;
+    }
+
+    if (product.group) {
+        scene.remove(
+            product.group
+        );
+
+        disposeObject(
+            product.group
         );
     }
 
-    updateStatus();
-}
-
-function formatVec(values) {
-    if (!values) {
-        return "-";
-    }
-
-    return values
-        .map(
-            value =>
-                value.toFixed(3)
-        )
-        .join(", ");
-}
-
-function formatMatrix(values) {
-    if (!values) {
-        return "-";
-    }
-
-    return values
-        .map(
-            value =>
-                value.toFixed(3)
-        )
-        .join(", ");
-}
-
-function updateStatus() {
-    let reticleState =
-        "none";
-
     if (
-        reticle &&
-        reticle.visible
-    ) {
-        reticleState =
-            surfaceValid
-                ? "valid"
-                : "too tilted";
-    }
-
-    const sessionState =
-        xrSession
-            ? "running"
-            : "stopped";
-
-    const angleText =
-        reticle &&
-        reticle.visible
-            ? surfaceAngle.toFixed(1) +
-              "°"
-            : "-";
-
-    status.innerHTML =
-        "ID: 241482 | Coffee Table<br>" +
-
-        "Session: " +
-        sessionState +
-
-        " | Reticle: " +
-        reticleState +
-
-        " | Angle: " +
-        angleText +
-        "<br>" +
-
-        "Anchors: " +
-        (
-            anchorsEnabled
-                ? "ON"
-                : "OFF"
-        ) +
-
-        " | Products: " +
-        placed.length +
-        " / " +
-        MAX_TABLES +
-
-        "<br><br>" +
-
-        "<b>E1 CAMERA (LOCAL)</b><br>" +
-
-        "Start: [" +
-        formatVec(
-            startCameraPosition
-        ) +
-        "]<br>" +
-
-        "Current: [" +
-        formatVec(
-            currentCameraPosition
-        ) +
-        "]<br><br>" +
-
-        "<b>E1 SAME HIT</b><br>" +
-
-        "Viewer: [" +
-        formatVec(
-            hitViewerPosition
-        ) +
-        "]<br>" +
-
-        "Local: [" +
-        formatVec(
-            hitLocalPosition
-        ) +
-        "]<br><br>" +
-
-        "<b>E3 HIT POSE</b><br>" +
-
-        "Position: [" +
-        formatVec(
-            hitLocalPosition
-        ) +
-        "]<br>" +
-
-        "Normal [4,5,6]: [" +
-        formatVec(
-            hitNormalValues
-        ) +
-        "]<br>" +
-
-        "Matrix 16:<br>[" +
-        formatMatrix(
-            hitMatrixValues
-        ) +
-        "]";
-}
-
-function onSessionEnd() {
-    renderer.setAnimationLoop(
-        null
-    );
-
-    if (hitTestSource) {
-        hitTestSource.cancel();
-    }
-
-    hitTestSource = null;
-
-    for (
-        const item
-        of anchors
+        product.anchor &&
+        typeof product.anchor.delete === "function"
     ) {
         try {
-            item.anchor.delete();
+            product.anchor.delete();
         } catch (error) {
-            console.log(
-                "Anchor already removed."
+            console.warn(
+                "Could not delete anchor:",
+                error
             );
         }
     }
-
-    anchors.length = 0;
-
-    xrSession = null;
-    viewerSpace = null;
-    localSpace = null;
-
-    placeRequested = false;
-
-    surfaceValid = false;
-    surfaceAngle = 0;
-
-    anchorsEnabled = false;
-
-    startCameraPosition = null;
-    currentCameraPosition = null;
-    hitViewerPosition = null;
-    hitLocalPosition = null;
-    hitMatrixValues = null;
-    hitNormalValues = null;
-
-    reticle.visible = false;
-
-    arButton.textContent =
-        "START AR";
-
-    updateStatus();
 }
 
-function onResize() {
+// ----------------------------------------------------
+// DISPOSE OBJECT
+// ----------------------------------------------------
+
+function disposeObject(object) {
+    object.traverse(child => {
+        if (child.geometry) {
+            child.geometry.dispose();
+        }
+
+        if (child.material) {
+            if (
+                Array.isArray(
+                    child.material
+                )
+            ) {
+                child.material.forEach(
+                    material =>
+                        material.dispose()
+                );
+            } else {
+                child.material.dispose();
+            }
+        }
+    });
+}
+
+// ----------------------------------------------------
+// OVERLAY
+// ----------------------------------------------------
+
+function updateOverlay() {
+    if (!xrSession) {
+        anchorStatus.textContent =
+            "Anchors: OFF";
+
+        productStatus.textContent =
+            `Products: ${placedProducts.length}/${MAX_PRODUCTS}`;
+
+        if (!reticle.visible) {
+            reticleStatus.textContent =
+                "Reticle: none";
+
+            angleStatus.textContent =
+                "Angle: --";
+        }
+
+        return;
+    }
+
+    /*
+     * For this experiment anchors are OFF.
+     */
+    anchorStatus.textContent =
+        "Anchors: OFF";
+
+    productStatus.textContent =
+        `Products: ${placedProducts.length}/${MAX_PRODUCTS}`;
+
+    if (!reticle.visible) {
+        reticleStatus.textContent =
+            "Reticle: none";
+
+        angleStatus.textContent =
+            "Angle: --";
+
+        return;
+    }
+
+    if (
+        currentTiltAngle !== null
+    ) {
+        angleStatus.textContent =
+            `Angle: ${currentTiltAngle.toFixed(1)}°`;
+    } else {
+        angleStatus.textContent =
+            "Angle: --";
+    }
+
+    if (surfaceValid) {
+        reticleStatus.textContent =
+            "Reticle: valid";
+    } else {
+        reticleStatus.textContent =
+            "Reticle: too tilted";
+    }
+}
+
+// ----------------------------------------------------
+// PREVENT XR SELECT ON UI
+// ----------------------------------------------------
+
+function preventOverlayPlacement(element) {
+    element.addEventListener(
+        "beforexrselect",
+        event => {
+            event.preventDefault();
+        }
+    );
+}
+
+// ----------------------------------------------------
+// FORMAT VECTOR
+// ----------------------------------------------------
+
+function formatVector(values) {
+    if (!values) {
+        return "waiting...";
+    }
+
+    return (
+        "[" +
+        values
+            .map(value =>
+                Number(value).toFixed(3)
+            )
+            .join(", ") +
+        "]"
+    );
+}
+
+// ----------------------------------------------------
+// WINDOW RESIZE
+// ----------------------------------------------------
+
+function onWindowResize() {
     camera.aspect =
         window.innerWidth /
         window.innerHeight;
