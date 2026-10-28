@@ -15,10 +15,6 @@ let localSpace = null;
 let placeRequested = false;
 let surfaceValid = false;
 let surfaceAngle = 0;
-
-/*
-    ANCHORS OFF TEST
-*/
 let anchorsEnabled = false;
 
 const placed = [];
@@ -93,8 +89,11 @@ function init() {
     );
 
     /*
-        Block XR placement only when
-        the user presses an actual UI button.
+        IMPORTANT:
+        beforexrselect must only block XR selection
+        when the user touches an actual UI button.
+
+        It must NOT be attached to the whole overlay.
     */
 
     clearButton.addEventListener(
@@ -219,13 +218,6 @@ async function onARButton() {
         status.innerHTML =
             "Starting AR...";
 
-        /*
-            ANCHORS OFF TEST
-
-            "anchors" is intentionally NOT requested.
-            Hit testing and DOM overlay are still used.
-        */
-
         const session =
             await navigator.xr.requestSession(
                 "immersive-ar",
@@ -235,6 +227,7 @@ async function onARButton() {
                     ],
 
                     optionalFeatures: [
+                        "anchors",
                         "dom-overlay"
                     ],
 
@@ -277,7 +270,7 @@ async function onSessionStarted(session) {
         On Android WebXR a screen tap
         generates the select event.
 
-        We only request placement here.
+        We ONLY set the request here.
         Placement happens in render().
     */
 
@@ -304,12 +297,14 @@ async function onSessionStarted(session) {
             "local"
         );
 
-    /*
-        ANCHORS ARE FORCED OFF
-        FOR THIS EXPERIMENT.
-    */
-
-    anchorsEnabled = false;
+    if (session.enabledFeatures) {
+        anchorsEnabled =
+            Array.from(
+                session.enabledFeatures
+            ).includes("anchors");
+    } else {
+        anchorsEnabled = false;
+    }
 
     hitTestSource =
         await session.requestHitTestSource({
@@ -332,13 +327,6 @@ function onSelect() {
 
 function render(time, frame) {
     if (frame && xrSession) {
-
-        /*
-            updateAnchors() is harmless here.
-            anchors[] remains empty because
-            anchors are disabled.
-        */
-
         updateAnchors(frame);
 
         if (
@@ -367,25 +355,21 @@ function render(time, frame) {
                     );
 
                     /*
-                        Placement happens in
-                        the XR frame after select.
+                        Placement happens here,
+                        on the frame after select.
                     */
 
-                    if (placeRequested) {
+                    if (
+                        placeRequested &&
+                        surfaceValid
+                    ) {
+                        placeTable(
+                            hit,
+                            pose
+                        );
 
-                        if (surfaceValid) {
-                            placeTable(
-                                hit,
-                                pose
-                            );
-                        }
-
-                        /*
-                            Consume the tap even if
-                            the surface was invalid.
-                        */
-
-                        placeRequested = false;
+                        placeRequested =
+                            false;
                     }
 
                 } else {
@@ -459,13 +443,12 @@ function trackingLost() {
     surfaceAngle = 0;
 
     /*
-        Consume a pending placement request
-        when there is no valid hit.
-    */
+        Do NOT clear placeRequested here.
 
-    if (placeRequested) {
-        placeRequested = false;
-    }
+        A slow phone can temporarily lose
+        a hit for one frame immediately
+        after the user taps.
+    */
 }
 
 function placeTable(hit, pose) {
@@ -491,24 +474,14 @@ function placeTable(hit, pose) {
 
     placed.push(table);
 
-    /*
-        createAnchor() is still kept so the
-        original program structure remains.
-
-        Because anchorsEnabled is false,
-        it immediately returns and the table
-        uses pose fallback.
-    */
-
     createAnchor(
         hit,
         table
     );
 
     /*
-        Multi-placement:
+        Multi-placement variant:
         maximum 5 products.
-
         The 6th removes the oldest.
     */
 
@@ -620,30 +593,6 @@ function createCoffeeTable() {
         table.add(leg);
     }
 
-    /*
-        Verify dimensions with Box3.
-    */
-
-    table.updateMatrixWorld(true);
-
-    const box =
-        new THREE.Box3().setFromObject(
-            table
-        );
-
-    const size =
-        new THREE.Vector3();
-
-    box.getSize(size);
-
-    console.log(
-        "Coffee table size:",
-        size.x.toFixed(3),
-        size.y.toFixed(3),
-        size.z.toFixed(3),
-        "metres"
-    );
-
     return table;
 }
 
@@ -651,13 +600,6 @@ async function createAnchor(
     hit,
     table
 ) {
-    /*
-        FALLBACK PATH.
-
-        During this test anchorsEnabled
-        is false, so no XRAnchor is created.
-    */
-
     if (
         !anchorsEnabled ||
         typeof hit.createAnchor !==
@@ -669,6 +611,11 @@ async function createAnchor(
     try {
         const anchor =
             await hit.createAnchor();
+
+        /*
+            The table may have been removed
+            while the anchor was being created.
+    */
 
         if (
             !placed.includes(
@@ -815,11 +762,6 @@ function updateStatus() {
         "Angle: " +
         angleText +
         "<br>" +
-
-        /*
-            For this experiment this
-            will display OFF.
-        */
 
         "Anchors: " +
         (
