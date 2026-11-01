@@ -56,7 +56,6 @@ AFRAME.registerSystem('x1482-gallery', {
     if (!this.selected) return;
 
     const selectedEl = this.selected;
-
     this.selected = null;
 
     if (selectedEl.parentNode) {
@@ -85,12 +84,8 @@ AFRAME.registerSystem('x1482-gallery', {
 
     let selectedName = 'none';
 
-    if (
-      this.selected &&
-      this.selected.components['x1482-exhibit']
-    ) {
-      selectedName =
-        this.selected.components['x1482-exhibit'].data.name;
+    if (this.selected && this.selected.components['x1482-exhibit']) {
+      selectedName = this.selected.components['x1482-exhibit'].data.name;
     }
 
     panel.setAttribute(
@@ -122,8 +117,7 @@ AFRAME.registerComponent('x1482-motion', {
   schema: {
     type: {
       type: 'string',
-      default: 'pulse',
-      oneOf: ['bob', 'orbit', 'pulse']
+      default: 'pulse'
     },
 
     amplitude: {
@@ -147,16 +141,14 @@ AFRAME.registerComponent('x1482-motion', {
     this.isPaused = false;
   },
 
-  update: function (oldData) {
+  update: function () {
   },
 
-  tick: function (time, timeDelta) {
+  tick: function (time) {
     if (this.isPaused) return;
-    if (this.data.type !== 'pulse') return;
 
     const angle =
-      (time / this.data.period) * Math.PI * 2 +
-      this.data.phase;
+      (time / this.data.period) * Math.PI * 2 + this.data.phase;
 
     const pulse =
       1 + Math.sin(angle) * this.data.amplitude;
@@ -185,6 +177,31 @@ AFRAME.registerComponent('x1482-motion', {
 });
 
 
+AFRAME.registerComponent('x1482-texture', {
+
+  schema: {
+    src: {
+      type: 'string',
+      default: ''
+    }
+  },
+
+  init: function () {
+    this.applyTexture();
+  },
+
+  update: function () {
+    this.applyTexture();
+  },
+
+  applyTexture: function () {
+    if (!this.data.src) return;
+
+    this.el.setAttribute('material', 'src', this.data.src);
+  }
+});
+
+
 AFRAME.registerComponent('x1482-exhibit', {
 
   schema: {
@@ -197,9 +214,8 @@ AFRAME.registerComponent('x1482-exhibit', {
   init: function () {
     this.gallery = this.el.sceneEl.systems['x1482-gallery'];
 
-    this.originalColor = this.el.getAttribute('material')
-      ? this.el.getAttribute('material').color
-      : this.el.getAttribute('color');
+    const material = this.el.getAttribute('material');
+    this.originalColor = material ? material.color : '#ffffff';
 
     if (this.gallery) {
       this.gallery.registerExhibit(this.el);
@@ -213,74 +229,26 @@ AFRAME.registerComponent('x1482-exhibit', {
       if (this.gallery && this.gallery.selected === this.el) {
         this.el.setAttribute('material', 'color', '#ffff66');
       } else {
-        this.el.setAttribute(
-          'material',
-          'color',
-          this.originalColor
-        );
+        this.el.setAttribute('material', 'color', this.originalColor);
       }
     };
 
     this.onClick = () => {
       if (!this.gallery) return;
 
-      const previous = this.gallery.selected;
-
-      if (
-        previous &&
-        previous !== this.el &&
-        previous.components['x1482-exhibit']
-      ) {
-        const oldComponent =
-          previous.components['x1482-exhibit'];
-
-        previous.setAttribute(
-          'material',
-          'color',
-          oldComponent.originalColor
-        );
-      }
-
       this.gallery.selectExhibit(this.el);
-
-      this.el.setAttribute(
-        'material',
-        'color',
-        '#ffff66'
-      );
+      this.el.setAttribute('material', 'color', '#ffff66');
     };
 
-    this.el.addEventListener(
-      'mouseenter',
-      this.onMouseEnter
-    );
-
-    this.el.addEventListener(
-      'mouseleave',
-      this.onMouseLeave
-    );
-
-    this.el.addEventListener(
-      'click',
-      this.onClick
-    );
+    this.el.addEventListener('mouseenter', this.onMouseEnter);
+    this.el.addEventListener('mouseleave', this.onMouseLeave);
+    this.el.addEventListener('click', this.onClick);
   },
 
   remove: function () {
-    this.el.removeEventListener(
-      'mouseenter',
-      this.onMouseEnter
-    );
-
-    this.el.removeEventListener(
-      'mouseleave',
-      this.onMouseLeave
-    );
-
-    this.el.removeEventListener(
-      'click',
-      this.onClick
-    );
+    this.el.removeEventListener('mouseenter', this.onMouseEnter);
+    this.el.removeEventListener('mouseleave', this.onMouseLeave);
+    this.el.removeEventListener('click', this.onClick);
 
     if (this.gallery) {
       this.gallery.unregisterExhibit(this.el);
