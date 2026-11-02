@@ -32,19 +32,41 @@ AFRAME.registerSystem('x1482-gallery', {
   },
 
   select: function (el) {
-    if (this.selected && this.selected !== el) {
-      const old = this.selected.components['x1482-exhibit'];
+
+    // Selecting the same object again removes selection.
+    if (this.selected === el) {
+      const current =
+        el.components['x1482-exhibit'];
+
+      if (current) {
+        current.setSelected(false);
+      }
+
+      this.selected = null;
+      this.updatePanel();
+      return;
+    }
+
+    // Remove selection from the old object.
+    if (this.selected) {
+      const old =
+        this.selected.components['x1482-exhibit'];
 
       if (old) {
-        this.selected.setAttribute(
-          'material',
-          'color',
-          old.originalColor
-        );
+        old.setSelected(false);
       }
     }
 
+    // Select the new object.
     this.selected = el;
+
+    const current =
+      el.components['x1482-exhibit'];
+
+    if (current) {
+      current.setSelected(true);
+    }
+
     this.updatePanel();
   },
 
@@ -52,7 +74,8 @@ AFRAME.registerSystem('x1482-gallery', {
     this.motionPaused = !this.motionPaused;
 
     this.exhibits.forEach((el) => {
-      const motion = el.components['x1482-motion'];
+      const motion =
+        el.components['x1482-motion'];
 
       if (!motion) return;
 
@@ -73,10 +96,13 @@ AFRAME.registerSystem('x1482-gallery', {
     if (el.parentNode) {
       el.parentNode.removeChild(el);
     }
+
+    this.updatePanel();
   },
 
   updatePanel: function () {
-    const panel = document.querySelector('#info-text');
+    const panel =
+      document.querySelector('#info-text');
 
     if (!panel) return;
 
@@ -116,7 +142,10 @@ AFRAME.registerSystem('x1482-gallery', {
   },
 
   remove: function () {
-    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener(
+      'keydown',
+      this.onKeyDown
+    );
   }
 
 });
@@ -148,7 +177,9 @@ AFRAME.registerComponent('x1482-motion', {
   },
 
   init: function () {
-    this.baseScale = this.el.object3D.scale.clone();
+    this.baseScale =
+      this.el.object3D.scale.clone();
+
     this.paused = false;
   },
 
@@ -158,7 +189,9 @@ AFRAME.registerComponent('x1482-motion', {
       oldData.type &&
       oldData.type !== this.data.type
     ) {
-      this.el.object3D.scale.copy(this.baseScale);
+      this.el.object3D.scale.copy(
+        this.baseScale
+      );
     }
   },
 
@@ -167,11 +200,14 @@ AFRAME.registerComponent('x1482-motion', {
     if (this.data.type !== 'pulse') return;
 
     const angle =
-      (time / this.data.period) * Math.PI * 2 +
+      (time / this.data.period) *
+      Math.PI * 2 +
       this.data.phase;
 
     const amount =
-      1 + Math.sin(angle) * this.data.amplitude;
+      1 +
+      Math.sin(angle) *
+      this.data.amplitude;
 
     this.el.object3D.scale.set(
       this.baseScale.x * amount,
@@ -190,7 +226,9 @@ AFRAME.registerComponent('x1482-motion', {
 
   remove: function () {
     if (this.baseScale) {
-      this.el.object3D.scale.copy(this.baseScale);
+      this.el.object3D.scale.copy(
+        this.baseScale
+      );
     }
   }
 
@@ -226,7 +264,10 @@ AFRAME.registerComponent('x1482-texture', {
   },
 
   update: function (oldData) {
-    if (!oldData || oldData.src !== this.data.src) {
+    if (
+      !oldData ||
+      oldData.src !== this.data.src
+    ) {
       this.applyTexture();
     }
   },
@@ -243,12 +284,17 @@ AFRAME.registerComponent('x1482-texture', {
     this.el.setAttribute(
       'material',
       'repeat',
-      this.data.repeat.x + ' ' + this.data.repeat.y
+      this.data.repeat.x +
+      ' ' +
+      this.data.repeat.y
     );
   },
 
   remove: function () {
-    this.el.removeAttribute('material', 'src');
+    this.el.removeAttribute(
+      'material',
+      'src'
+    );
   }
 
 });
@@ -272,6 +318,8 @@ AFRAME.registerComponent('x1482-exhibit', {
     this.gallery =
       this.el.sceneEl.systems['x1482-gallery'];
 
+    this.selected = false;
+
     const material =
       this.el.getAttribute('material');
 
@@ -279,6 +327,93 @@ AFRAME.registerComponent('x1482-exhibit', {
       material && material.color
         ? material.color
         : '#ffffff';
+
+    const motion =
+      this.el.getAttribute('x1482-motion');
+
+    this.originalAmplitude =
+      motion && motion.amplitude !== undefined
+        ? motion.amplitude
+        : 0.10;
+
+
+    // Create information card.
+    this.card =
+      document.createElement('a-entity');
+
+    this.card.setAttribute(
+      'position',
+      '0 1.7 0'
+    );
+
+    this.card.setAttribute(
+      'visible',
+      false
+    );
+
+
+    // Card background.
+    const background =
+      document.createElement('a-plane');
+
+    background.setAttribute(
+      'width',
+      '2'
+    );
+
+    background.setAttribute(
+      'height',
+      '0.6'
+    );
+
+    background.setAttribute(
+      'color',
+      '#062f3a'
+    );
+
+    background.setAttribute(
+      'opacity',
+      '0.9'
+    );
+
+
+    // Card text.
+    const text =
+      document.createElement('a-text');
+
+    text.setAttribute(
+      'value',
+      this.data.name +
+      '\n' +
+      this.data.info
+    );
+
+    text.setAttribute(
+      'align',
+      'center'
+    );
+
+    text.setAttribute(
+      'color',
+      '#ffffff'
+    );
+
+    text.setAttribute(
+      'width',
+      '2'
+    );
+
+    text.setAttribute(
+      'position',
+      '0 0 0.01'
+    );
+
+
+    this.card.appendChild(background);
+    this.card.appendChild(text);
+
+    this.el.appendChild(this.card);
+
 
     if (this.gallery) {
       this.gallery.register(this.el);
@@ -288,24 +423,17 @@ AFRAME.registerComponent('x1482-exhibit', {
   events: {
 
     mouseenter: function () {
-      this.el.setAttribute(
-        'material',
-        'color',
-        '#7fffd4'
-      );
-    },
-
-    mouseleave: function () {
-      if (
-        this.gallery &&
-        this.gallery.selected === this.el
-      ) {
+      if (!this.selected) {
         this.el.setAttribute(
           'material',
           'color',
-          '#ffff66'
+          '#7fffd4'
         );
-      } else {
+      }
+    },
+
+    mouseleave: function () {
+      if (!this.selected) {
         this.el.setAttribute(
           'material',
           'color',
@@ -318,11 +446,46 @@ AFRAME.registerComponent('x1482-exhibit', {
       if (!this.gallery) return;
 
       this.gallery.select(this.el);
+    }
+  },
+
+  setSelected: function (value) {
+    this.selected = value;
+
+    if (this.card) {
+      this.card.setAttribute(
+        'visible',
+        value
+      );
+    }
+
+    if (value) {
 
       this.el.setAttribute(
         'material',
         'color',
         '#ffff66'
+      );
+
+      // Change motion through setAttribute.
+      this.el.setAttribute(
+        'x1482-motion',
+        'amplitude',
+        this.originalAmplitude * 1.8
+      );
+
+    } else {
+
+      this.el.setAttribute(
+        'material',
+        'color',
+        this.originalColor
+      );
+
+      this.el.setAttribute(
+        'x1482-motion',
+        'amplitude',
+        this.originalAmplitude
       );
     }
   },
