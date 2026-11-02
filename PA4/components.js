@@ -9,7 +9,7 @@ AFRAME.registerSystem('x1482-gallery', {
     window.addEventListener('keydown', this.onKeyDown);
   },
 
-  registerExhibit: function (el) {
+  register: function (el) {
     if (!this.exhibits.includes(el)) {
       this.exhibits.push(el);
     }
@@ -17,7 +17,7 @@ AFRAME.registerSystem('x1482-gallery', {
     this.updatePanel();
   },
 
-  unregisterExhibit: function (el) {
+  unregister: function (el) {
     const index = this.exhibits.indexOf(el);
 
     if (index !== -1) {
@@ -31,7 +31,19 @@ AFRAME.registerSystem('x1482-gallery', {
     this.updatePanel();
   },
 
-  selectExhibit: function (el) {
+  select: function (el) {
+    if (this.selected && this.selected !== el) {
+      const old = this.selected.components['x1482-exhibit'];
+
+      if (old) {
+        this.selected.setAttribute(
+          'material',
+          'color',
+          old.originalColor
+        );
+      }
+    }
+
     this.selected = el;
     this.updatePanel();
   },
@@ -55,14 +67,40 @@ AFRAME.registerSystem('x1482-gallery', {
   removeSelected: function () {
     if (!this.selected) return;
 
-    const selectedEl = this.selected;
+    const el = this.selected;
     this.selected = null;
 
-    if (selectedEl.parentNode) {
-      selectedEl.parentNode.removeChild(selectedEl);
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  },
+
+  updatePanel: function () {
+    const panel = document.querySelector('#info-text');
+
+    if (!panel) return;
+
+    let name = 'none';
+
+    if (
+      this.selected &&
+      this.selected.components['x1482-exhibit']
+    ) {
+      name =
+        this.selected.components['x1482-exhibit'].data.name;
     }
 
-    this.updatePanel();
+    panel.setAttribute(
+      'value',
+      'ID: 241482\n' +
+      'Theme: Underwater Research Base\n' +
+      'Motion: Pulse\n' +
+      'Interaction: Gaze\n' +
+      'Layout: Corridor\n' +
+      'Selected: ' + name +
+      ' (' + (this.selected ? 1 : 0) +
+      ' of ' + this.exhibits.length + ')'
+    );
   },
 
   onKeyDown: function (event) {
@@ -77,34 +115,6 @@ AFRAME.registerSystem('x1482-gallery', {
     }
   },
 
-  updatePanel: function () {
-    const panel = document.querySelector('#info-text');
-
-    if (!panel) return;
-
-    let selectedName = 'none';
-
-    if (this.selected && this.selected.components['x1482-exhibit']) {
-      selectedName = this.selected.components['x1482-exhibit'].data.name;
-    }
-
-    panel.setAttribute(
-      'value',
-      'ID: 241482\n' +
-      'Theme: Underwater Research Base\n' +
-      'Motion: Pulse\n' +
-      'Interaction: Gaze\n' +
-      'Layout: Corridor\n' +
-      'Selected: ' +
-      selectedName +
-      ' (' +
-      (this.selected ? '1' : '0') +
-      ' of ' +
-      this.exhibits.length +
-      ')'
-    );
-  },
-
   remove: function () {
     window.removeEventListener('keydown', this.onKeyDown);
   }
@@ -117,17 +127,18 @@ AFRAME.registerComponent('x1482-motion', {
   schema: {
     type: {
       type: 'string',
-      default: 'pulse'
+      default: 'pulse',
+      oneOf: ['bob', 'orbit', 'pulse']
     },
 
     amplitude: {
       type: 'number',
-      default: 0.12
+      default: 0.10
     },
 
     period: {
       type: 'number',
-      default: 2000
+      default: 2500
     },
 
     phase: {
@@ -138,34 +149,43 @@ AFRAME.registerComponent('x1482-motion', {
 
   init: function () {
     this.baseScale = this.el.object3D.scale.clone();
-    this.isPaused = false;
+    this.paused = false;
   },
 
-  update: function () {
+  update: function (oldData) {
+    if (
+      oldData &&
+      oldData.type &&
+      oldData.type !== this.data.type
+    ) {
+      this.el.object3D.scale.copy(this.baseScale);
+    }
   },
 
   tick: function (time) {
-    if (this.isPaused) return;
+    if (this.paused) return;
+    if (this.data.type !== 'pulse') return;
 
     const angle =
-      (time / this.data.period) * Math.PI * 2 + this.data.phase;
+      (time / this.data.period) * Math.PI * 2 +
+      this.data.phase;
 
-    const pulse =
+    const amount =
       1 + Math.sin(angle) * this.data.amplitude;
 
     this.el.object3D.scale.set(
-      this.baseScale.x * pulse,
-      this.baseScale.y * pulse,
-      this.baseScale.z * pulse
+      this.baseScale.x * amount,
+      this.baseScale.y * amount,
+      this.baseScale.z * amount
     );
   },
 
   pause: function () {
-    this.isPaused = true;
+    this.paused = true;
   },
 
   play: function () {
-    this.isPaused = false;
+    this.paused = false;
   },
 
   remove: function () {
@@ -183,6 +203,21 @@ AFRAME.registerComponent('x1482-texture', {
     src: {
       type: 'string',
       default: ''
+    },
+
+    repeat: {
+      type: 'vec2',
+      default: {x: 1, y: 1}
+    },
+
+    normalSrc: {
+      type: 'string',
+      default: ''
+    },
+
+    anisotropy: {
+      type: 'number',
+      default: 1
     }
   },
 
@@ -190,15 +225,32 @@ AFRAME.registerComponent('x1482-texture', {
     this.applyTexture();
   },
 
-  update: function () {
-    this.applyTexture();
+  update: function (oldData) {
+    if (!oldData || oldData.src !== this.data.src) {
+      this.applyTexture();
+    }
   },
 
   applyTexture: function () {
     if (!this.data.src) return;
 
-    this.el.setAttribute('material', 'src', this.data.src);
+    this.el.setAttribute(
+      'material',
+      'src',
+      this.data.src
+    );
+
+    this.el.setAttribute(
+      'material',
+      'repeat',
+      this.data.repeat.x + ' ' + this.data.repeat.y
+    );
+  },
+
+  remove: function () {
+    this.el.removeAttribute('material', 'src');
   }
+
 });
 
 
@@ -208,50 +260,76 @@ AFRAME.registerComponent('x1482-exhibit', {
     name: {
       type: 'string',
       default: 'Exhibit'
+    },
+
+    info: {
+      type: 'string',
+      default: ''
     }
   },
 
   init: function () {
-    this.gallery = this.el.sceneEl.systems['x1482-gallery'];
+    this.gallery =
+      this.el.sceneEl.systems['x1482-gallery'];
 
-    const material = this.el.getAttribute('material');
-    this.originalColor = material ? material.color : '#ffffff';
+    const material =
+      this.el.getAttribute('material');
+
+    this.originalColor =
+      material && material.color
+        ? material.color
+        : '#ffffff';
 
     if (this.gallery) {
-      this.gallery.registerExhibit(this.el);
+      this.gallery.register(this.el);
     }
+  },
 
-    this.onMouseEnter = () => {
-      this.el.setAttribute('material', 'color', '#7fffd4');
-    };
+  events: {
 
-    this.onMouseLeave = () => {
-      if (this.gallery && this.gallery.selected === this.el) {
-        this.el.setAttribute('material', 'color', '#ffff66');
+    mouseenter: function () {
+      this.el.setAttribute(
+        'material',
+        'color',
+        '#7fffd4'
+      );
+    },
+
+    mouseleave: function () {
+      if (
+        this.gallery &&
+        this.gallery.selected === this.el
+      ) {
+        this.el.setAttribute(
+          'material',
+          'color',
+          '#ffff66'
+        );
       } else {
-        this.el.setAttribute('material', 'color', this.originalColor);
+        this.el.setAttribute(
+          'material',
+          'color',
+          this.originalColor
+        );
       }
-    };
+    },
 
-    this.onClick = () => {
+    click: function () {
       if (!this.gallery) return;
 
-      this.gallery.selectExhibit(this.el);
-      this.el.setAttribute('material', 'color', '#ffff66');
-    };
+      this.gallery.select(this.el);
 
-    this.el.addEventListener('mouseenter', this.onMouseEnter);
-    this.el.addEventListener('mouseleave', this.onMouseLeave);
-    this.el.addEventListener('click', this.onClick);
+      this.el.setAttribute(
+        'material',
+        'color',
+        '#ffff66'
+      );
+    }
   },
 
   remove: function () {
-    this.el.removeEventListener('mouseenter', this.onMouseEnter);
-    this.el.removeEventListener('mouseleave', this.onMouseLeave);
-    this.el.removeEventListener('click', this.onClick);
-
     if (this.gallery) {
-      this.gallery.unregisterExhibit(this.el);
+      this.gallery.unregister(this.el);
     }
   }
 
