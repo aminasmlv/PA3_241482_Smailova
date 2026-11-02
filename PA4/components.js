@@ -32,11 +32,8 @@ AFRAME.registerSystem('x1482-gallery', {
   },
 
   select: function (el) {
-
-    // Selecting the same object again removes selection.
     if (this.selected === el) {
-      const current =
-        el.components['x1482-exhibit'];
+      const current = el.components['x1482-exhibit'];
 
       if (current) {
         current.setSelected(false);
@@ -47,21 +44,17 @@ AFRAME.registerSystem('x1482-gallery', {
       return;
     }
 
-    // Remove selection from the old object.
     if (this.selected) {
-      const old =
-        this.selected.components['x1482-exhibit'];
+      const old = this.selected.components['x1482-exhibit'];
 
       if (old) {
         old.setSelected(false);
       }
     }
 
-    // Select the new object.
     this.selected = el;
 
-    const current =
-      el.components['x1482-exhibit'];
+    const current = el.components['x1482-exhibit'];
 
     if (current) {
       current.setSelected(true);
@@ -74,8 +67,7 @@ AFRAME.registerSystem('x1482-gallery', {
     this.motionPaused = !this.motionPaused;
 
     this.exhibits.forEach((el) => {
-      const motion =
-        el.components['x1482-motion'];
+      const motion = el.components['x1482-motion'];
 
       if (!motion) return;
 
@@ -101,8 +93,7 @@ AFRAME.registerSystem('x1482-gallery', {
   },
 
   updatePanel: function () {
-    const panel =
-      document.querySelector('#info-text');
+    const panel = document.querySelector('#info-text');
 
     if (!panel) return;
 
@@ -336,8 +327,6 @@ AFRAME.registerComponent('x1482-exhibit', {
         ? motion.amplitude
         : 0.10;
 
-
-    // Create information card.
     this.card =
       document.createElement('a-entity');
 
@@ -351,8 +340,6 @@ AFRAME.registerComponent('x1482-exhibit', {
       false
     );
 
-
-    // Card background.
     const background =
       document.createElement('a-plane');
 
@@ -376,8 +363,6 @@ AFRAME.registerComponent('x1482-exhibit', {
       '0.9'
     );
 
-
-    // Card text.
     const text =
       document.createElement('a-text');
 
@@ -408,12 +393,10 @@ AFRAME.registerComponent('x1482-exhibit', {
       '0 0 0.01'
     );
 
-
     this.card.appendChild(background);
     this.card.appendChild(text);
 
     this.el.appendChild(this.card);
-
 
     if (this.gallery) {
       this.gallery.register(this.el);
@@ -460,14 +443,12 @@ AFRAME.registerComponent('x1482-exhibit', {
     }
 
     if (value) {
-
       this.el.setAttribute(
         'material',
         'color',
         '#ffff66'
       );
 
-      // Change motion through setAttribute.
       this.el.setAttribute(
         'x1482-motion',
         'amplitude',
@@ -475,7 +456,6 @@ AFRAME.registerComponent('x1482-exhibit', {
       );
 
     } else {
-
       this.el.setAttribute(
         'material',
         'color',
